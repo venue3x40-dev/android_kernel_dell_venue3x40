@@ -35,7 +35,6 @@
 #include <asm/intel_mid_rpmsg.h>
 #include <asm/apb_timer.h>
 #include <asm/reboot.h>
-#include <asm/proto.h>
 #include "intel_mid_weak_decls.h"
 #include "intel_soc_pmu.h"
 
@@ -84,26 +83,10 @@ static void intel_mid_reboot(void)
 	if (intel_scu_ipc_fw_update()) {
 		pr_debug("intel_scu_fw_update: IFWI upgrade failed...\n");
 	}
-
-	if (reboot_force) {
-		if (force_cold_boot)
-			rpmsg_send_generic_simple_command(IPCMSG_COLD_BOOT, 0);
-		else
-			rpmsg_send_generic_simple_command(IPCMSG_COLD_RESET, 0);
-	} else {
-		/* system_state is SYSTEM_RESTART now,
-		 * polling to wait for SCU not busy.
-		 */
-		while (intel_scu_ipc_check_status())
-			udelay(10);
-
-		if (force_cold_boot)
-			intel_scu_ipc_raw_cmd(IPCMSG_COLD_BOOT,
-				0, NULL, 0, NULL, 0, 0, 0);
-		else
-			intel_scu_ipc_raw_cmd(IPCMSG_COLD_RESET,
-				0, NULL, 0, NULL, 0, 0, 0);
-	}
+	if (force_cold_boot)
+		rpmsg_send_generic_simple_command(IPCMSG_COLD_BOOT, 0);
+	else
+		rpmsg_send_generic_simple_command(IPCMSG_COLD_RESET, 0);
 }
 
 static unsigned long __init intel_mid_calibrate_tsc(void)
@@ -154,6 +137,13 @@ static void __cpuinit intel_mid_arch_setup(void)
 		return;
 	}
 	switch (boot_cpu_data.x86_model) {
+	case 0x35:
+		__intel_mid_cpu_chip = INTEL_MID_CPU_CHIP_CLOVERVIEW;
+		break;
+	case 0x3C:
+	case 0x4A:
+		__intel_mid_cpu_chip = INTEL_MID_CPU_CHIP_TANGIER;
+		break;
 	case 0x5A:
 		__intel_mid_cpu_chip = INTEL_MID_CPU_CHIP_ANNIEDALE;
 		break;

@@ -19,6 +19,8 @@
 #include <linux/cpu.h>
 #include <linux/pm_runtime.h>
 #include <linux/suspend.h>
+#include <linux/mdm_ctrl_switcher.h>
+
 #include "pci.h"
 
 struct pci_dynid {
@@ -729,7 +731,13 @@ static int pci_pm_resume(struct device *dev)
 	struct pci_dev *pci_dev = to_pci_dev(dev);
 	const struct dev_pm_ops *pm = dev->driver ? dev->driver->pm : NULL;
 	int error = 0;
-
+#ifdef MDM_CTRL_SWITCH_OFF
+	if(pci_dev->device==0x119D)
+	{
+		pci_set_power_state(pci_dev,PCI_D3cold);
+		return 0;
+	}
+#endif
 	/*
 	 * This is necessary for the suspend error path in which resume is
 	 * called without restoring the standard config registers of the device.

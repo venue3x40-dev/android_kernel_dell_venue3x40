@@ -40,7 +40,10 @@
 
 /* driver names */
 #define SST_DRV_NAME "intel_sst_driver"
+#define SST_CLV_PCI_ID	0x08E7
 #define SST_MRFLD_PCI_ID 0x119A
+#define SST_BYT_PCI_ID  0x0F28
+#define SST_CHT_PCI_ID 0x22A8
 
 #define SST_SUSPEND_DELAY 2000
 #define FW_CONTEXT_MEM (64*1024)
@@ -57,10 +60,15 @@
 #define MRFLD_FW_BSS_RESET_BIT 0
 extern struct intel_sst_drv *sst_drv_ctx;
 enum sst_states {
-	SST_FW_LOADING = 1,
+	SST_FW_LOADED = 1,
 	SST_FW_RUNNING,
-	SST_RESET,
+	SST_START_INIT,
+	SST_UN_INIT,
+	SST_ERROR,
+	SST_SUSPENDED,
+	SST_FW_CTXT_RESTORE,
 	SST_SHUTDOWN,
+	SST_FW_LIB_LOAD,
 };
 
 enum sst_algo_ops {
@@ -108,8 +116,6 @@ enum sst_stream_states {
 enum sst_ram_type {
 	SST_IRAM	= 1,
 	SST_DRAM	= 2,
-	SST_DDR	= 5,
-	SST_CUSTOM_INFO	= 7,	/* consists of FW binary information */
 };
 
 /* SST shim registers to structure mapping  */
@@ -556,6 +562,9 @@ struct intel_sst_drv {
 };
 
 extern struct intel_sst_drv *sst_drv_ctx;
+extern struct sst_platform_info byt_rvp_platform_data;
+extern struct sst_platform_info byt_ffrd8_platform_data;
+extern struct sst_platform_info cht_platform_data;
 
 /* misc definitions */
 #define FW_DWNL_ID 0xFF
@@ -632,7 +641,9 @@ int sst_load_all_modules_elf(struct intel_sst_drv *ctx,
 		struct sst_module_info *mod_table, int mod_table_size);
 int sst_get_next_lib_mem(struct sst_mem_mgr *mgr, int size,
 			unsigned long *lib_base);
+void sst_post_download_ctp(struct intel_sst_drv *ctx);
 void sst_post_download_mrfld(struct intel_sst_drv *ctx);
+void sst_post_download_byt(struct intel_sst_drv *ctx);
 int sst_get_block_stream(struct intel_sst_drv *sst_drv_ctx);
 void sst_memcpy_free_resources(void);
 
@@ -651,6 +662,7 @@ int sst_send_sync_msg(int ipc, int str_id);
 int sst_get_num_channel(struct snd_sst_params *str_param);
 int sst_get_sfreq(struct snd_sst_params *str_param);
 int intel_sst_check_device(void);
+int sst_alloc_stream_ctp(char *params, struct sst_block *block);
 int sst_alloc_stream_mrfld(char *params, struct sst_block *block);
 void sst_restore_fw_context(void);
 struct sst_block *sst_create_block(struct intel_sst_drv *ctx,
@@ -685,7 +697,7 @@ static inline int sst_pm_runtime_put(struct intel_sst_drv *sst_drv)
 {
 	int ret;
 
-	ret = pm_runtime_put_sync(sst_drv->dev);
+	ret = pm_runtime_put(sst_drv->dev);
 	if (ret < 0)
 		return ret;
 	atomic_dec(&sst_drv->pm_usage_count);

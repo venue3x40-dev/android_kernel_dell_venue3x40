@@ -18,6 +18,8 @@
 #include <linux/stat.h>
 
 #include "power_supply.h"
+#include <linux/gpio.h>
+#include <linux/intel_mid_hwid.h>
 
 /*
  * This is because the name "current" breaks the device attr macro.
@@ -38,6 +40,16 @@
 	.store = power_supply_store_property,				\
 }
 
+#define POWER_SUPPLY_WR_ATTR(_name)					\
+{									\
+	.attr = \
+	{ \
+		.name = #_name, \
+		.mode = S_IRUGO | S_IWUSR, \
+	},					\
+	.show = power_supply_show_property,				\
+	.store = power_supply_store_property,				\
+}
 static struct device_attribute power_supply_attrs[];
 
 static ssize_t power_supply_show_property(struct device *dev,
@@ -45,7 +57,7 @@ static ssize_t power_supply_show_property(struct device *dev,
 					  char *buf) {
 	static char *type_text[] = {
 		"Unknown", "Battery", "UPS", "Mains", "USB", "USB",
-		"USB_DCP", "USB_CDP", "USB_ACA"
+		"USB_DCP", "USB_CDP", "USB_ACA","Wireless"
 	};
 	static char *status_text[] = {
 		"Unknown", "Charging", "Discharging", "Not charging", "Full"
@@ -72,10 +84,19 @@ static ssize_t power_supply_show_property(struct device *dev,
 	struct power_supply *psy = dev_get_drvdata(dev);
 	const ptrdiff_t off = attr - power_supply_attrs;
 	union power_supply_propval value;
-
-	if (off == POWER_SUPPLY_PROP_TYPE)
-		value.intval = psy->type;
-	else
+	int gpio_value;
+	if (off == POWER_SUPPLY_PROP_TYPE){
+		dev_info(dev,"%s:the is %d.\n",__func__,psy->type);
+		gpio_value = gpio_get_value(45);
+		if((!(intel_mid_get_board_id() & HW_BOARD_7_LTE)) && (!gpio_value)){
+			if((psy->type ==POWER_SUPPLY_TYPE_USB))
+				value.intval = 9;
+			else
+				value.intval = psy->type;
+		}else{
+			value.intval = psy->type;
+		}
+	}else
 		ret = psy->get_property(psy, off, &value);
 
 	if (ret < 0) {
@@ -137,7 +158,7 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(status),
 	POWER_SUPPLY_ATTR(charge_type),
 	POWER_SUPPLY_ATTR(health),
-	POWER_SUPPLY_ATTR(present),
+	POWER_SUPPLY_WR_ATTR(present),
 	POWER_SUPPLY_ATTR(online),
 	POWER_SUPPLY_ATTR(authentic),
 	POWER_SUPPLY_ATTR(technology),
@@ -197,7 +218,7 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(time_to_full_avg),
 	POWER_SUPPLY_ATTR(type),
 	POWER_SUPPLY_ATTR(charge_term_cur),
-	POWER_SUPPLY_ATTR(enable_charging),
+	POWER_SUPPLY_WR_ATTR(enable_charging),
 	POWER_SUPPLY_ATTR(enable_charger),
 	POWER_SUPPLY_ATTR(cable_type),
 	POWER_SUPPLY_ATTR(priority),

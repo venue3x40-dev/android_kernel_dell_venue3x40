@@ -55,30 +55,17 @@ static inline void sst_fill_byte_control(char *param,
 			     byte_data, len + sizeof(*byte_data));
 }
 
-static int sst_fill_and_send_cmd_unlocked(struct sst_data *sst,
-				 u8 ipc_msg, u8 block, u8 task_id, u8 pipe_id,
-				 void *cmd_data, u16 len)
-{
-	sst_fill_byte_control(sst->byte_stream, ipc_msg, block, task_id, pipe_id,
-			      len, cmd_data);
-	return sst_dsp->ops->set_generic_params(SST_SET_BYTE_STREAM,
-						sst->byte_stream);
-}
-
-/**
- * sst_fill_and_send_cmd - generate the IPC message and send it to the FW
- * @ipc_msg:	type of IPC (CMD, SET_PARAMS, GET_PARAMS)
- * @cmd_data:	the IPC payload
- */
 static int sst_fill_and_send_cmd(struct sst_data *sst,
 				 u8 ipc_msg, u8 block, u8 task_id, u8 pipe_id,
 				 void *cmd_data, u16 len)
 {
-	int ret;
+	int ret = 0;
 
 	mutex_lock(&sst->lock);
-	ret = sst_fill_and_send_cmd_unlocked(sst, ipc_msg, block, task_id, pipe_id,
-					     cmd_data, len);
+	sst_fill_byte_control(sst->byte_stream, ipc_msg, block, task_id, pipe_id,
+			      len, cmd_data);
+	ret = sst_dsp->ops->set_generic_params(SST_SET_BYTE_STREAM,
+					       sst->byte_stream);
 	mutex_unlock(&sst->lock);
 
 	return ret;
@@ -145,58 +132,12 @@ static u8 sst_ssp_channel_map[SST_MAX_TDM_SLOTS] = {
 	0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80, /* default tx map */
 };
 
-static void sst_send_slot_map(struct sst_data *sst)
-{
-	struct sst_param_sba_ssp_slot_map cmd;
-
-	pr_debug("Enter: %s\n", __func__);
-
-	SST_FILL_DEFAULT_DESTINATION(cmd.header.dst);
-	cmd.header.command_id = SBA_SET_SSP_SLOT_MAP;
-	cmd.header.length = sizeof(struct sst_param_sba_ssp_slot_map)
-				- sizeof(struct sst_dsp_header);
-
-	cmd.param_id = SBA_SET_SSP_SLOT_MAP;
-	cmd.param_len = sizeof(cmd.rx_slot_map) + sizeof(cmd.tx_slot_map) + sizeof(cmd.ssp_index);
-	cmd.ssp_index = SSP_CODEC;
-
-	memcpy(cmd.rx_slot_map, &sst_ssp_slot_map[0], sizeof(cmd.rx_slot_map));
-	memcpy(cmd.tx_slot_map, &sst_ssp_channel_map[0], sizeof(cmd.tx_slot_map));
-
-	sst_fill_and_send_cmd(sst, SST_IPC_IA_SET_PARAMS, SST_FLAG_BLOCKED,
-			      SST_TASK_SBA, 0, &cmd,
-			      sizeof(cmd.header) + cmd.header.length);
-}
-
-int sst_slot_enum_info(struct snd_kcontrol *kcontrol,
-		       struct snd_ctl_elem_info *uinfo)
-{
-	struct sst_enum *e = (struct sst_enum *)kcontrol->private_value;
-
-	uinfo->type = SNDRV_CTL_ELEM_TYPE_ENUMERATED;
-	uinfo->count = 1;
-	uinfo->value.enumerated.items = e->max;
-
-	if (uinfo->value.enumerated.item > e->max - 1)
-		uinfo->value.enumerated.item = e->max - 1;
-	strcpy(uinfo->value.enumerated.name,
-		e->texts[uinfo->value.enumerated.item]);
-	return 0;
-}
-
-/**
- * sst_slot_get - get the status of the interleaver/deinterleaver control
- *
- * Searches the map where the control status is stored, and gets the
- * channel/slot which is currently set for this enumerated control. Since it is
- * an enumerated control, there is only one possible value.
- */
 static int sst_slot_get(struct snd_kcontrol *kcontrol,
 			struct snd_ctl_elem_value *ucontrol)
 {
-	struct sst_enum *e = (void *)kcontrol->private_value;
+	struct soc_enum *e = (void *)kcontrol->private_value;
 	unsigned int ctl_no = e->reg;
-	unsigned int is_tx = e->tx;
+	unsigned int is_tx = e->reg2;
 	unsigned int val, mux;
 	u8 *map = is_tx ? sst_ssp_channel_map : sst_ssp_slot_map;
 
@@ -212,15 +153,11 @@ static int sst_slot_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-/**
- * sst_slot_put - set the status of interleaver/deinterleaver control
- *
+/*
  * (de)interleaver controls are defined in opposite sense to be user-friendly
  *
- * Instead of the enum value being the value written to the register, it is the
- * register address; and the kcontrol number (register num) is the value written
- * to the register. This is so that there can be only one value for each
- * slot/channel since there is only one control for each slot/channel.
+ * Instead of the enum value being the value set to the register, it is the
+ * register address; and the kcontrol_no is the value written to the register.
  *
  * This means that whenever an enum is set, we need to clear the bit
  * for that kcontrol_no for all the interleaver OR deinterleaver registers
@@ -228,15 +165,12 @@ static int sst_slot_get(struct snd_kcontrol *kcontrol,
 static int sst_slot_put(struct snd_kcontrol *kcontrol,
 			struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_platform *platform = snd_kcontrol_chip(kcontrol);
-	struct sst_data *sst = snd_soc_platform_get_drvdata(platform);
-	struct sst_enum *e = (void *)kcontrol->private_value;
+	struct soc_enum *e = (void *)kcontrol->private_value;
 	int i;
 	unsigned int ctl_no = e->reg;
-	unsigned int is_tx = e->tx;
+	unsigned int is_tx = e->reg2;
 	unsigned int slot_channel_no;
 	unsigned int val, mux;
-
 	u8 *map = is_tx ? sst_ssp_channel_map : sst_ssp_slot_map;
 
 	val = 1 << ctl_no;
@@ -257,9 +191,6 @@ static int sst_slot_put(struct snd_kcontrol *kcontrol,
 
 	pr_debug("%s: %s %s map = %#x\n", __func__, is_tx ? "tx channel" : "rx slot",
 		 e->texts[mux], map[slot_channel_no]);
-
-	if (e->w && e->w->power)
-		sst_send_slot_map(sst);
 	return 0;
 }
 
@@ -350,10 +281,9 @@ static void sst_send_algo_cmd(struct sst_data *sst,
 	int len;
 	struct sst_cmd_set_params *cmd;
 
-	/* bc->max includes sizeof algos + length field */
 	len = sizeof(cmd->dst) + sizeof(cmd->command_id) + bc->max;
 
-	cmd = kzalloc(len, GFP_KERNEL);
+	cmd = kzalloc(len + bc->max, GFP_KERNEL);
 	if (cmd == NULL) {
 		pr_err("Failed to send cmd, kzalloc failed\n");
 		return;
@@ -364,28 +294,26 @@ static void sst_send_algo_cmd(struct sst_data *sst,
 	memcpy(cmd->params, bc->params, bc->max);
 
 	sst_fill_and_send_cmd(sst, SST_IPC_IA_SET_PARAMS, SST_FLAG_BLOCKED,
-			      bc->task_id, 0, cmd, len);
+				bc->task_id, 0, cmd, len);
 	kfree(cmd);
+
 }
 
-/**
- * sst_find_and_send_pipe_algo - send all the algo parameters for a pipe
- *
- * The algos which are in each pipeline are sent to the firmware one by one
- */
-static void sst_find_and_send_pipe_algo(struct sst_data *sst,
-					const char *pipe, struct sst_ids *ids)
+static void sst_find_and_send_pipe_algo(struct snd_soc_platform *platform,
+					struct snd_soc_dapm_widget *w)
 {
 	struct sst_algo_control *bc;
+	struct sst_data *sst = snd_soc_platform_get_drvdata(platform);
+	struct sst_ids *ids = w->priv;
 	struct module *algo = NULL;
 
-	pr_debug("Enter: %s, widget=%s\n", __func__, pipe);
+	pr_debug("Enter:%s, widget=%s\n", __func__, w->name);
 
 	list_for_each_entry(algo, &ids->algo_list, node) {
-		bc = (void *)algo->kctl->private_value;
+			bc = (void *)algo->kctl->private_value;
 
-		pr_debug("Found algo control name=%s pipe=%s\n", algo->kctl->id.name, pipe);
-		sst_send_algo_cmd(sst, bc);
+			pr_debug("Found algo control name =%s pipe=%s\n", algo->kctl->id.name,  w->name);
+			sst_send_algo_cmd(sst, bc);
 	}
 }
 
@@ -398,7 +326,6 @@ int sst_algo_bytes_ctl_info(struct snd_kcontrol *kcontrol,
 	uinfo->type = SNDRV_CTL_ELEM_TYPE_BYTES;
 	uinfo->count = bc->max;
 
-	/* allocate space to cache the algo parameters in the driver */
 	if (bc->params == NULL) {
 		bc->params = devm_kzalloc(platform->dev, bc->max, GFP_KERNEL);
 		if (bc->params == NULL) {
@@ -414,6 +341,7 @@ static int sst_algo_control_get(struct snd_kcontrol *kcontrol,
 {
 	struct sst_algo_control *bc = (void *)kcontrol->private_value;
 
+	pr_debug("in %s\n", __func__);
 	switch (bc->type) {
 	case SST_ALGO_PARAMS:
 		if (bc->params)
@@ -446,6 +374,7 @@ static int sst_algo_control_set(struct snd_kcontrol *kcontrol,
 		break;
 	case SST_ALGO_BYPASS:
 		bc->bypass = !!ucontrol->value.integer.value[0];
+		pr_debug("%s: Mute %d\n", __func__, bc->bypass);
 		break;
 	default:
 		pr_err("Invalid Input- algo type:%ld\n", ucontrol->value.integer.value[0]);
@@ -470,23 +399,11 @@ static int sst_gain_ctl_info(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-/**
- * sst_send_gain_cmd - send the gain algorithm IPC to the FW
- * @gv:		the stored value of gain (also contains rampduration)
- * @mute:	flag that indicates whether this was called from the
- *		digital_mute callback or directly. If called from the
- *		digital_mute callback, module will be muted/unmuted based on this
- *		flag. The flag is always 0 if called directly.
- *
- * The user-set gain value is sent only if the user-controllable 'mute' control
- * is OFF (indicated by gv->mute). Otherwise, the mute value (MIN value) is
- * sent.
- */
 static void sst_send_gain_cmd(struct sst_data *sst, struct sst_gain_value *gv,
 			      u16 task_id, u16 loc_id, u16 module_id, int mute)
 {
 	struct sst_cmd_set_gain_dual cmd;
-	pr_debug("%s\n", __func__);
+	pr_debug("%s", __func__);
 
 	cmd.header.command_id = MMX_SET_GAIN;
 	SST_FILL_DEFAULT_DESTINATION(cmd.header.dst);
@@ -521,12 +438,15 @@ static int sst_gain_get(struct snd_kcontrol *kcontrol,
 	case SST_GAIN_TLV:
 		ucontrol->value.integer.value[0] = gv->l_gain;
 		ucontrol->value.integer.value[1] = gv->r_gain;
+		pr_debug("%s: Volume %d, %d\n", __func__, gv->l_gain, gv->r_gain);
 		break;
 	case SST_GAIN_MUTE:
 		ucontrol->value.integer.value[0] = gv->mute ? 1 : 0;
+		pr_debug("%s: Mute %d\n", __func__, gv->mute);
 		break;
 	case SST_GAIN_RAMP_DURATION:
 		ucontrol->value.integer.value[0] = gv->ramp_duration;
+		pr_debug("%s: RampDuration %d\n", __func__, gv->ramp_duration);
 		break;
 	default:
 		pr_err("Invalid Input- gain type:%d\n", mc->type);
@@ -547,15 +467,15 @@ static int sst_gain_put(struct snd_kcontrol *kcontrol,
 	case SST_GAIN_TLV:
 		gv->l_gain = ucontrol->value.integer.value[0];
 		gv->r_gain = ucontrol->value.integer.value[1];
-		pr_debug("%s: %s: Volume %d, %d\n", __func__, mc->pname, gv->l_gain, gv->r_gain);
+		pr_debug("%s: Volume %d, %d\n", __func__, gv->l_gain, gv->r_gain);
 		break;
 	case SST_GAIN_MUTE:
 		gv->mute = !!ucontrol->value.integer.value[0];
-		pr_debug("%s: %s: Mute %d\n", __func__, mc->pname, gv->mute);
+		pr_debug("%s: Mute %d\n", __func__, gv->mute);
 		break;
 	case SST_GAIN_RAMP_DURATION:
 		gv->ramp_duration = ucontrol->value.integer.value[0];
-		pr_debug("%s: %s: RampDuration %d\n", __func__, mc->pname, gv->ramp_duration);
+		pr_debug("%s: RampDuration %d\n", __func__, gv->ramp_duration);
 		break;
 	default:
 		pr_err("Invalid Input- gain type:%d\n", mc->type);
@@ -565,25 +485,6 @@ static int sst_gain_put(struct snd_kcontrol *kcontrol,
 	if (mc->w && mc->w->power)
 		sst_send_gain_cmd(sst, gv, mc->task_id,
 				mc->pipe_id | mc->instance_id, mc->module_id, 0);
-	return 0;
-}
-
-static void sst_set_pipe_gain(struct sst_ids *ids, struct sst_data *sst, int mute);
-
-static void sst_send_pipe_module_params(struct snd_soc_dapm_widget *w)
-{
-	struct sst_data *sst = snd_soc_platform_get_drvdata(w->platform);
-	struct sst_ids *ids = w->priv;
-
-	sst_find_and_send_pipe_algo(sst, w->name, ids);
-	sst_set_pipe_gain(ids, sst, 0);
-}
-
-static int sst_generic_modules_event(struct snd_soc_dapm_widget *w,
-				     struct snd_kcontrol *k, int event)
-{
-	if (SND_SOC_DAPM_EVENT_ON(event))
-		sst_send_pipe_module_params(w);
 	return 0;
 }
 
@@ -613,18 +514,12 @@ static const uint swm_mixer_input_ids[SST_SWM_INPUT_COUNT] = {
 	[SST_IP_MEDIA3]		= SST_SWM_IN_MEDIA3,
 };
 
-/**
- * fill_swm_input - fill in the SWM input ids given the register
- *
- * The register value is a bit-field inicated which mixer inputs are ON. Use the
- * lookup table to get the input-id and fill it in the structure.
- */
 static int fill_swm_input(struct swm_input_ids *swm_input, unsigned int reg)
 {
 	uint i, is_set, nb_inputs = 0;
 	u16 input_loc_id;
 
-	pr_debug("%s: reg: %#x\n", __func__, reg);
+	pr_debug("%s:reg value:%#x\n", __func__, reg);
 	for (i = 0; i < SST_SWM_INPUT_COUNT; i++) {
 		is_set = reg & BIT(i);
 		if (!is_set)
@@ -635,7 +530,7 @@ static int fill_swm_input(struct swm_input_ids *swm_input, unsigned int reg)
 				     input_loc_id, SST_DEFAULT_MODULE_ID);
 		nb_inputs++;
 		swm_input++;
-		pr_debug("input id: %#x, nb_inputs: %d\n", input_loc_id, nb_inputs);
+		pr_debug("input id:%#x, nb_inputs:%d\n", input_loc_id, nb_inputs);
 
 		if (nb_inputs == SST_CMD_SWM_MAX_INPUTS) {
 			pr_warn("%s: SET_SWM cmd max inputs reached", __func__);
@@ -654,7 +549,7 @@ static void sst_set_pipe_gain(struct sst_ids *ids, struct sst_data *sst, int mut
 	list_for_each_entry(gain, &ids->gain_list, node) {
 		struct snd_kcontrol *kctl = gain->kctl;
 
-		pr_debug("control name=%s\n", kctl->id.name);
+		pr_debug("control name=%s", kctl->id.name);
 		mc = (void *)kctl->private_value;
 		gv = mc->gain_val;
 
@@ -672,7 +567,7 @@ static int sst_swm_mixer_event(struct snd_soc_dapm_widget *w,
 	bool set_mixer = false;
 	int val = sst->widget[ids->reg];
 
-	pr_debug("%s: widget = %s\n", __func__, w->name);
+	pr_debug("%s: widget=%s\n", __func__, w->name);
 	pr_debug("%s: reg[%d] = %#x\n", __func__, ids->reg, val);
 
 	switch (event) {
@@ -803,43 +698,317 @@ SST_SBA_DECLARE_MIX_CONTROLS(sst_mix_bt_controls, SST_MIX_BT);
 SST_SBA_DECLARE_MIX_CONTROLS(sst_mix_fm_controls, SST_MIX_FM);
 SST_SBA_DECLARE_MIX_CONTROLS(sst_mix_modem_controls, SST_MIX_MODEM);
 
-void sst_handle_vb_timer(struct snd_soc_platform *p, bool enable)
+static int sst_vb_trigger_event(struct snd_soc_dapm_widget *w,
+			struct snd_kcontrol *k, int event)
 {
 	struct sst_cmd_generic cmd;
-	struct sst_data *sst = snd_soc_platform_get_drvdata(p);
-	static int timer_usage;
+	struct sst_data *sst = snd_soc_platform_get_drvdata(w->platform);
 
-	if (enable)
+	pr_debug("Enter:%s, widget=%s\n", __func__, w->name);
+	if (SND_SOC_DAPM_EVENT_ON(event))
 		cmd.header.command_id = SBA_VB_START;
 	else
 		cmd.header.command_id = SBA_IDLE;
-	pr_debug("%s: enable=%u, usage=%d\n", __func__, enable, timer_usage);
 
 	SST_FILL_DEFAULT_DESTINATION(cmd.header.dst);
 	cmd.header.length = 0;
 
-	if (enable)
+	if (SND_SOC_DAPM_EVENT_ON(event))
 		sst_dsp->ops->power(true);
 
-	mutex_lock(&sst->lock);
-	if (enable)
-		timer_usage++;
-	else
-		timer_usage--;
+	sst_fill_and_send_cmd(sst, SST_IPC_IA_CMD, SST_FLAG_BLOCKED,
+			      SST_TASK_SBA, 0, &cmd,
+			      sizeof(cmd.header) + cmd.header.length);
 
-	/* Send the command only if this call is the first enable or last
-	 * disable
-	 */
-	if ((enable && (timer_usage == 1)) ||
-	    (!enable && (timer_usage == 0)))
-		sst_fill_and_send_cmd_unlocked(sst, SST_IPC_IA_CMD, SST_FLAG_BLOCKED,
-				      SST_TASK_SBA, 0, &cmd,
-				      sizeof(cmd.header) + cmd.header.length);
-	mutex_unlock(&sst->lock);
-
-	if (!enable)
+	if (!SND_SOC_DAPM_EVENT_ON(event))
 		sst_dsp->ops->power(false);
+	return 0;
 }
+
+static void sst_send_slot_map(struct sst_data *sst)
+{
+	struct sst_param_sba_ssp_slot_map cmd;
+
+	pr_debug("Enter: %s", __func__);
+
+	SST_FILL_DEFAULT_DESTINATION(cmd.header.dst);
+	cmd.header.command_id = SBA_SET_SSP_SLOT_MAP;
+	cmd.header.length = sizeof(struct sst_param_sba_ssp_slot_map)
+				- sizeof(struct sst_dsp_header);
+
+	cmd.param_id = SBA_SET_SSP_SLOT_MAP;
+	cmd.param_len = sizeof(cmd.rx_slot_map) + sizeof(cmd.tx_slot_map) + sizeof(cmd.ssp_index);
+	cmd.ssp_index = SSP_CODEC;
+
+	memcpy(cmd.rx_slot_map, &sst_ssp_slot_map[0], sizeof(cmd.rx_slot_map));
+	memcpy(cmd.tx_slot_map, &sst_ssp_channel_map[0], sizeof(cmd.tx_slot_map));
+
+	sst_fill_and_send_cmd(sst, SST_IPC_IA_SET_PARAMS, SST_FLAG_BLOCKED,
+			      SST_TASK_SBA, 0, &cmd,
+			      sizeof(cmd.header) + cmd.header.length);
+}
+
+static int sst_ssp_event(struct snd_soc_dapm_widget *w,
+			 struct snd_kcontrol *k, int event)
+{
+	struct sst_cmd_sba_hw_set_ssp cmd;
+	struct sst_data *sst = snd_soc_platform_get_drvdata(w->platform);
+	struct sst_ids *ids = w->priv;
+	static int ssp_active[SST_NUM_SSPS];
+	unsigned int domain, mux;
+	unsigned int ssp_no = ids->ssp->ssp_number;
+	int domain_shift, mux_shift;
+	const struct sst_ssp_config *config;
+
+	pr_debug("Enter:%s, widget=%s\n", __func__, w->name);
+
+	SST_FILL_DEFAULT_DESTINATION(cmd.header.dst);
+	cmd.header.command_id = SBA_HW_SET_SSP;
+	cmd.header.length = sizeof(struct sst_cmd_sba_hw_set_ssp)
+				- sizeof(struct sst_dsp_header);
+	mux_shift = *ids->ssp->mux_shift;
+	mux = (mux_shift == -1) ? 0 : get_mux_state(sst, SST_MUX_REG, mux_shift);
+	domain_shift = (*ids->ssp->domain_shift)[mux];
+	domain = (domain_shift == -1) ? 0 : get_mux_state(sst, SST_MUX_REG, domain_shift);
+
+	config = &(*ids->ssp->ssp_config)[mux][domain];
+	pr_debug("%s: ssp_id: %u, mux: %d, domain: %d\n", __func__,
+		 config->ssp_id, mux, domain);
+
+	if (SND_SOC_DAPM_EVENT_ON(event))
+		ssp_active[ssp_no]++;
+	else
+		ssp_active[ssp_no]--;
+
+	pr_debug("%s: ssp_no: %u ssp_active: %d", __func__, ssp_no, ssp_active[ssp_no]);
+	if (ssp_active[ssp_no])
+		cmd.switch_state = SST_SWITCH_ON;
+	else
+		cmd.switch_state = SST_SWITCH_OFF;
+
+	cmd.selection = config->ssp_id;
+	cmd.nb_bits_per_slots = config->bits_per_slot;
+	cmd.nb_slots = config->slots;
+	cmd.mode = config->ssp_mode | (config->pcm_mode << 1);
+	cmd.duplex = config->duplex;
+	cmd.active_tx_slot_map = config->active_slot_map;
+	cmd.active_rx_slot_map = config->active_slot_map;
+	cmd.frame_sync_frequency = config->fs_frequency;
+	cmd.frame_sync_polarity = SSP_FS_ACTIVE_HIGH;
+	cmd.data_polarity = 1;
+	cmd.frame_sync_width = config->fs_width;
+	cmd.ssp_protocol = config->ssp_protocol;
+	cmd.start_delay = config->start_delay;
+	cmd.reserved1 = cmd.reserved2 = 0xFF;
+
+	sst_fill_and_send_cmd(sst, SST_IPC_IA_CMD, SST_FLAG_BLOCKED,
+			      SST_TASK_SBA, 0, &cmd,
+			      sizeof(cmd.header) + cmd.header.length);
+
+	if (SND_SOC_DAPM_EVENT_ON(event)) {
+		sst_find_and_send_pipe_algo(w->platform, w);
+		sst_send_slot_map(sst);
+		sst_set_pipe_gain(ids, sst, 0);
+	}
+	return 0;
+}
+
+static int sst_set_speech_path(struct snd_soc_dapm_widget *w,
+			       struct snd_kcontrol *k, int event)
+{
+	struct sst_cmd_set_speech_path cmd;
+	struct sst_data *sst = snd_soc_platform_get_drvdata(w->platform);
+	struct sst_ids *ids = w->priv;
+	bool is_wideband;
+	static int speech_active;
+
+	pr_debug("%s: widget=%s\n", __func__, w->name);
+
+	if (SND_SOC_DAPM_EVENT_ON(event)) {
+		speech_active++;
+		cmd.switch_state = SST_SWITCH_ON;
+	} else {
+		speech_active--;
+		cmd.switch_state = SST_SWITCH_OFF;
+	}
+
+	SST_FILL_DEFAULT_DESTINATION(cmd.header.dst);
+
+	cmd.header.command_id = SBA_VB_SET_SPEECH_PATH;
+	cmd.header.length = sizeof(struct sst_cmd_set_speech_path)
+				- sizeof(struct sst_dsp_header);
+	cmd.config.sample_length = 0;
+	cmd.config.rate = 0;		/* 8 khz */
+	cmd.config.format = 0;
+
+	is_wideband = get_mux_state(sst, SST_MUX_REG, SST_VOICE_MODE_SHIFT);
+	if (is_wideband)
+		cmd.config.rate = 1;	/* 16 khz */
+
+	if ((SND_SOC_DAPM_EVENT_ON(event) && (speech_active == 1)) ||
+			(SND_SOC_DAPM_EVENT_OFF(event) && (speech_active == 0)))
+		sst_fill_and_send_cmd(sst, SST_IPC_IA_CMD, SST_FLAG_BLOCKED,
+				SST_TASK_SBA, 0, &cmd,
+				sizeof(cmd.header) + cmd.header.length);
+
+	if (SND_SOC_DAPM_EVENT_ON(event)) {
+		sst_find_and_send_pipe_algo(w->platform, w);
+		sst_set_pipe_gain(ids, sst, 0);
+	}
+
+	return 0;
+
+}
+
+static int sst_set_media_path(struct snd_soc_dapm_widget *w,
+			      struct snd_kcontrol *k, int event)
+{
+	struct sst_cmd_set_media_path cmd;
+	struct sst_data *sst = snd_soc_platform_get_drvdata(w->platform);
+	struct sst_ids *ids = w->priv;
+
+	pr_debug("%s: widget=%s\n", __func__, w->name);
+	pr_debug("%s: task=%u, location=%#x\n", __func__,
+				ids->task_id, ids->location_id);
+
+	if (SND_SOC_DAPM_EVENT_ON(event))
+		cmd.switch_state = SST_PATH_ON;
+	else
+		cmd.switch_state = SST_PATH_OFF;
+
+	SST_FILL_DESTINATION(2, cmd.header.dst,
+			     ids->location_id, SST_DEFAULT_MODULE_ID);
+
+	/* MMX_SET_MEDIA_PATH == SBA_SET_MEDIA_PATH */
+	cmd.header.command_id = MMX_SET_MEDIA_PATH;
+	cmd.header.length = sizeof(struct sst_cmd_set_media_path)
+				- sizeof(struct sst_dsp_header);
+
+	sst_fill_and_send_cmd(sst, SST_IPC_IA_CMD, SST_FLAG_BLOCKED,
+			      ids->task_id, 0, &cmd,
+			      sizeof(cmd.header) + cmd.header.length);
+
+	if (SND_SOC_DAPM_EVENT_ON(event)) {
+		sst_find_and_send_pipe_algo(w->platform, w);
+		sst_set_pipe_gain(ids, sst, 0);
+	}
+
+	return 0;
+}
+
+static int sst_set_media_loop(struct snd_soc_dapm_widget *w,
+			struct snd_kcontrol *k, int event)
+{
+	struct sst_cmd_sba_set_media_loop_map cmd;
+	struct sst_data *sst = snd_soc_platform_get_drvdata(w->platform);
+	struct sst_ids *ids = w->priv;
+
+	pr_debug("Enter:%s, widget=%s\n", __func__, w->name);
+	if (SND_SOC_DAPM_EVENT_ON(event))
+		cmd.switch_state = SST_SWITCH_ON;
+	else
+		cmd.switch_state = SST_SWITCH_OFF;
+
+	SST_FILL_DESTINATION(2, cmd.header.dst,
+			     ids->location_id, SST_DEFAULT_MODULE_ID);
+
+	cmd.header.command_id = SBA_SET_MEDIA_LOOP_MAP;
+	cmd.header.length = sizeof(struct sst_cmd_sba_set_media_loop_map)
+				 - sizeof(struct sst_dsp_header);
+	cmd.param.part.rate = 2; /* 48khz */
+
+	cmd.param.part.format = ids->format; /* stereo/Mono */
+	cmd.param.part.sample_length = 1; /* 24bit left justified*/
+	cmd.map = 0; /* Algo sequence: Gain - DRP - FIR - IIR  */
+
+	sst_fill_and_send_cmd(sst, SST_IPC_IA_CMD, SST_FLAG_BLOCKED,
+			      SST_TASK_SBA, 0, &cmd,
+			      sizeof(cmd.header) + cmd.header.length);
+	if (SND_SOC_DAPM_EVENT_ON(event)) {
+		sst_find_and_send_pipe_algo(w->platform, w);
+		sst_set_pipe_gain(ids, sst, 0);
+	}
+	return 0;
+}
+
+static int sst_send_probe_cmd(struct sst_data *sst, u16 probe_pipe_id,
+			      int mode, int switch_state,
+			      const struct sst_probe_config *probe_cfg)
+{
+	struct sst_cmd_probe cmd;
+
+	memset(&cmd, 0, sizeof(cmd));
+
+	SST_FILL_DESTINATION(3, cmd.header.dst, SST_DEFAULT_CELL_NBR,
+			     probe_pipe_id, SST_DEFAULT_MODULE_ID);
+	cmd.header.command_id = SBA_PROBE;
+	cmd.header.length = sizeof(struct sst_cmd_probe)
+				 - sizeof(struct sst_dsp_header);
+	cmd.switch_state = switch_state;
+
+	SST_FILL_DESTINATION(2, cmd.probe_dst,
+			     probe_cfg->loc_id, probe_cfg->mod_id);
+
+	cmd.shared_mem = 1;
+	cmd.probe_in = 0;
+	cmd.probe_out = 0;
+
+	cmd.probe_mode = mode;
+	cmd.sample_length = probe_cfg->cfg.s_length;
+	cmd.rate = probe_cfg->cfg.rate;
+	cmd.format = probe_cfg->cfg.format;
+	cmd.sm_buf_id = 1;
+
+	return sst_fill_and_send_cmd(sst, SST_IPC_IA_CMD, SST_FLAG_BLOCKED,
+				     probe_cfg->task_id, 0, &cmd,
+				     sizeof(cmd.header) + cmd.header.length);
+}
+
+static const struct snd_kcontrol_new sst_probe_controls[];
+static const struct sst_probe_config sst_probes[];
+
+#define SST_MAX_PROBE_STREAMS 8
+int sst_dpcm_probe_send(struct snd_soc_platform *platform, u16 probe_pipe_id,
+			int substream, int direction, bool on)
+{
+	int switch_state = on ? SST_SWITCH_ON : SST_SWITCH_OFF;
+	struct sst_data *sst = snd_soc_platform_get_drvdata(platform);
+	const struct sst_probe_config *probe_cfg;
+	struct sst_probe_value *probe_val;
+	char *type;
+	int offset;
+	int mode;
+
+	if (direction == SNDRV_PCM_STREAM_CAPTURE) {
+		mode = SST_PROBE_EXTRACTOR;
+		offset = 0;
+		type = "extractor";
+	} else {
+		mode = SST_PROBE_INJECTOR;
+		offset = SST_MAX_PROBE_STREAMS;
+		type = "injector";
+	}
+	/* get the value of the probe connection kcontrol */
+	probe_val = (void *)sst_probe_controls[substream + offset].private_value;
+	probe_cfg = &sst_probes[probe_val->val];
+
+	pr_debug("%s: substream=%d, direction=%d\n", __func__, substream, direction);
+	pr_debug("%s: %s probe point at %s\n", __func__, type, probe_cfg->name);
+
+	return sst_send_probe_cmd(sst, probe_pipe_id, mode, switch_state, probe_cfg);
+}
+
+static const struct snd_kcontrol_new sst_mix_sw_aware =
+	SOC_SINGLE_EXT("switch", SST_MIX_SWITCH, 0, 1, 0,
+		sst_mix_get, sst_mix_put);
+
+static const char * const sst_bt_fm_texts[] = {
+	"fm", "bt",
+};
+
+static const struct snd_kcontrol_new sst_bt_fm_mux =
+	SST_SSP_MUX_CTL("ssp1_out", 0, SST_MUX_REG, SST_BT_FM_MUX_SHIFT, sst_bt_fm_texts,
+			sst_mux_get, sst_mux_put);
 
 #define SST_SSP_CODEC_MUX		0
 #define SST_SSP_CODEC_DOMAIN		0
@@ -866,16 +1035,6 @@ static const int sst_ssp_domain_shift[SST_NUM_SSPS][SST_MAX_SSP_MUX] = {
 	[SST_SSP2][0] = -1,
 };
 
-/**
- * sst_ssp_config - contains SSP configuration for different UCs
- *
- * The 3-D array contains SSP configuration for different SSPs for different
- * domains (e.g. NB, WB), as well as muxed SSPs.
- *
- * The first dimension has SSP number
- * The second dimension has SSP Muxing (e.g. BT/FM muxed on same SSP)
- * The third dimension has SSP domains (e.g. NB/WB for BT)
- */
 static const struct sst_ssp_config
 sst_ssp_configs[SST_NUM_SSPS][SST_MAX_SSP_MUX][SST_MAX_SSP_DOMAINS] = {
 	[SST_SSP0] = {
@@ -959,450 +1118,28 @@ sst_ssp_configs[SST_NUM_SSPS][SST_MAX_SSP_MUX][SST_MAX_SSP_DOMAINS] = {
 	},
 };
 
-#define SST_SSP_CFG(wssp_no)                                                            \
-	(const struct sst_ssp_cfg){ .ssp_config = &sst_ssp_configs[wssp_no],            \
-				.ssp_number = wssp_no,                              \
-				.mux_shift = &sst_ssp_mux_shift[wssp_no],           \
-				.domain_shift = &sst_ssp_domain_shift[wssp_no], }
-
-void send_ssp_cmd(struct snd_soc_platform *platform, const char *id, bool enable)
-{
-	struct sst_cmd_sba_hw_set_ssp cmd;
-	struct sst_data *sst = snd_soc_platform_get_drvdata(platform);
-	unsigned int domain, mux;
-	int domain_shift, mux_shift, ssp_no;
-	const struct sst_ssp_config *config;
-	const struct sst_ssp_cfg *ssp;
-
-
-	pr_err("Enter:%s, enable=%d port_name=%s\n", __func__, enable, id);
-
-	if (strcmp(id, "ssp0-port") == 0)
-		ssp_no = SST_SSP0;
-	else if (strcmp(id, "ssp1-port") == 0)
-		ssp_no = SST_SSP1;
-	else if (strcmp(id, "ssp2-port") == 0)
-		ssp_no = SST_SSP2;
-	else
-		return;
-
-	ssp = &SST_SSP_CFG(ssp_no);
-
-	SST_FILL_DEFAULT_DESTINATION(cmd.header.dst);
-	cmd.header.command_id = SBA_HW_SET_SSP;
-	cmd.header.length = sizeof(struct sst_cmd_sba_hw_set_ssp)
-				- sizeof(struct sst_dsp_header);
-	mux_shift = *ssp->mux_shift;
-	mux = (mux_shift == -1) ? 0 : get_mux_state(sst, SST_MUX_REG, mux_shift);
-	domain_shift = (*ssp->domain_shift)[mux];
-	domain = (domain_shift == -1) ? 0 : get_mux_state(sst, SST_MUX_REG, domain_shift);
-
-	config = &(*ssp->ssp_config)[mux][domain];
-	pr_debug("%s: ssp_id: %u, mux: %d, domain: %d\n", __func__,
-		 config->ssp_id, mux, domain);
-
-	if (enable)
-		cmd.switch_state = SST_SWITCH_ON;
-	else
-		cmd.switch_state = SST_SWITCH_OFF;
-
-	cmd.selection = config->ssp_id;
-	cmd.nb_bits_per_slots = config->bits_per_slot;
-	cmd.nb_slots = config->slots;
-	cmd.mode = config->ssp_mode | (config->pcm_mode << 1);
-	cmd.duplex = config->duplex;
-	cmd.active_tx_slot_map = config->active_slot_map;
-	cmd.active_rx_slot_map = config->active_slot_map;
-	cmd.frame_sync_frequency = config->fs_frequency;
-	cmd.frame_sync_polarity = SSP_FS_ACTIVE_HIGH;
-	cmd.data_polarity = 1;
-	cmd.frame_sync_width = config->fs_width;
-	cmd.ssp_protocol = config->ssp_protocol;
-	cmd.start_delay = config->start_delay;
-	cmd.reserved1 = cmd.reserved2 = 0xFF;
-
-	sst_fill_and_send_cmd(sst, SST_IPC_IA_CMD, SST_FLAG_BLOCKED,
-				SST_TASK_SBA, 0, &cmd,
-				sizeof(cmd.header) + cmd.header.length);
-}
-
-static int sst_set_be_modules(struct snd_soc_dapm_widget *w,
-			 struct snd_kcontrol *k, int event)
-{
-	struct sst_data *sst = snd_soc_platform_get_drvdata(w->platform);
-
-	pr_debug("Enter: %s, widget=%s\n", __func__, w->name);
-
-	if (SND_SOC_DAPM_EVENT_ON(event)) {
-		sst_send_slot_map(sst);
-		sst_send_pipe_module_params(w);
-	}
-	return 0;
-}
-
-/**
- * sst_set_speech_path - send SPEECH_UL/DL enable/disable IPC
- *
- * The SPEECH_PATH IPC enables more than one pipeline (speech uplink, downlink,
- * sidetone etc.). Since the command should be sent only once, use a refcount to
- * send the command only on first enable/last disable.
- */
-static int sst_set_speech_path(struct snd_soc_dapm_widget *w,
-			       struct snd_kcontrol *k, int event)
-{
-	struct sst_cmd_set_speech_path cmd;
-	struct sst_data *sst = snd_soc_platform_get_drvdata(w->platform);
-	bool is_wideband;
-	static int speech_active;
-
-	pr_debug("%s: widget=%s\n", __func__, w->name);
-
-	if (SND_SOC_DAPM_EVENT_ON(event)) {
-		speech_active++;
-		cmd.switch_state = SST_SWITCH_ON;
-	} else {
-		speech_active--;
-		cmd.switch_state = SST_SWITCH_OFF;
-	}
-
-	SST_FILL_DEFAULT_DESTINATION(cmd.header.dst);
-
-	cmd.header.command_id = SBA_VB_SET_SPEECH_PATH;
-	cmd.header.length = sizeof(struct sst_cmd_set_speech_path)
-				- sizeof(struct sst_dsp_header);
-	cmd.config.cfg.s_length = 0;
-	cmd.config.cfg.rate = 0;		/* 8 khz */
-	cmd.config.cfg.format = 0;
-
-	is_wideband = get_mux_state(sst, SST_MUX_REG, SST_VOICE_MODE_SHIFT);
-	if (is_wideband)
-		cmd.config.cfg.rate = 1;	/* 16 khz */
-
-	if ((SND_SOC_DAPM_EVENT_ON(event) && (speech_active == 1)) ||
-	    (SND_SOC_DAPM_EVENT_OFF(event) && (speech_active == 0)))
-		sst_fill_and_send_cmd(sst, SST_IPC_IA_CMD, SST_FLAG_BLOCKED,
-				SST_TASK_SBA, 0, &cmd,
-				sizeof(cmd.header) + cmd.header.length);
-
-	if (SND_SOC_DAPM_EVENT_ON(event))
-		sst_send_pipe_module_params(w);
-	return 0;
-}
-
-/**
- * sst_set_linked_pipe - send gain/algo for a linked input/output
- *
- * A linked pipe is dependent on the power status of its parent widget since it
- * itself does not have any enabling command.
- */
-static int sst_set_linked_pipe(struct snd_soc_dapm_widget *w,
-		       struct snd_kcontrol *k, int event)
-{
-	struct sst_data *sst = snd_soc_platform_get_drvdata(w->platform);
-	struct sst_ids *ids = w->priv;
-	pr_debug("%s: widget=%s\n", __func__, w->name);
-	if (SND_SOC_DAPM_EVENT_ON(event)) {
-		if (ids->parent_w && ids->parent_w->power)
-			sst_find_and_send_pipe_algo(sst, w->name, ids);
-			sst_set_pipe_gain(ids, sst, 0);
-	}
-	return 0;
-}
-
-static int sst_set_media_path(struct snd_soc_dapm_widget *w,
-			      struct snd_kcontrol *k, int event)
-{
-	struct sst_cmd_set_media_path cmd;
-	struct sst_data *sst = snd_soc_platform_get_drvdata(w->platform);
-	struct sst_ids *ids = w->priv;
-
-	pr_debug("%s: widget=%s\n", __func__, w->name);
-	pr_debug("%s: task=%u, location=%#x\n", __func__,
-				ids->task_id, ids->location_id);
-
-	if (SND_SOC_DAPM_EVENT_ON(event))
-		cmd.switch_state = SST_PATH_ON;
-	else
-		cmd.switch_state = SST_PATH_OFF;
-
-	SST_FILL_DESTINATION(2, cmd.header.dst,
-			     ids->location_id, SST_DEFAULT_MODULE_ID);
-
-	/* MMX_SET_MEDIA_PATH == SBA_SET_MEDIA_PATH */
-	cmd.header.command_id = MMX_SET_MEDIA_PATH;
-	cmd.header.length = sizeof(struct sst_cmd_set_media_path)
-				- sizeof(struct sst_dsp_header);
-
-	sst_fill_and_send_cmd(sst, SST_IPC_IA_CMD, SST_FLAG_BLOCKED,
-			      ids->task_id, 0, &cmd,
-			      sizeof(cmd.header) + cmd.header.length);
-
-	if (SND_SOC_DAPM_EVENT_ON(event))
-		sst_send_pipe_module_params(w);
-	return 0;
-}
-
-static int sst_set_media_loop(struct snd_soc_dapm_widget *w,
-			struct snd_kcontrol *k, int event)
-{
-	struct sst_cmd_sba_set_media_loop_map cmd;
-	struct sst_data *sst = snd_soc_platform_get_drvdata(w->platform);
-	struct sst_ids *ids = w->priv;
-
-	pr_debug("Enter:%s, widget=%s\n", __func__, w->name);
-	if (SND_SOC_DAPM_EVENT_ON(event))
-		cmd.switch_state = SST_SWITCH_ON;
-	else
-		cmd.switch_state = SST_SWITCH_OFF;
-
-	SST_FILL_DESTINATION(2, cmd.header.dst,
-			     ids->location_id, SST_DEFAULT_MODULE_ID);
-
-	cmd.header.command_id = SBA_SET_MEDIA_LOOP_MAP;
-	cmd.header.length = sizeof(struct sst_cmd_sba_set_media_loop_map)
-				 - sizeof(struct sst_dsp_header);
-	cmd.param.part.cfg.rate = 2; /* 48khz */
-
-	cmd.param.part.cfg.format = ids->format; /* stereo/Mono */
-	cmd.param.part.cfg.s_length = 1; /* 24bit left justified*/
-	cmd.map = 0; /* Algo sequence: Gain - DRP - FIR - IIR  */
-
-	sst_fill_and_send_cmd(sst, SST_IPC_IA_CMD, SST_FLAG_BLOCKED,
-			      SST_TASK_SBA, 0, &cmd,
-			      sizeof(cmd.header) + cmd.header.length);
-	if (SND_SOC_DAPM_EVENT_ON(event))
-		sst_send_pipe_module_params(w);
-	return 0;
-}
-
-static int sst_tone_generator_event(struct snd_soc_dapm_widget *w,
-				    struct snd_kcontrol *k, int event)
-{
-	struct sst_cmd_tone_stop cmd;
-	struct sst_data *sst = snd_soc_platform_get_drvdata(w->platform);
-	struct sst_ids *ids = w->priv;
-
-	pr_debug("Enter:%s, widget=%s\n", __func__, w->name);
-	/* in case of tone generator, the params are combined with the ON cmd */
-	if (SND_SOC_DAPM_EVENT_ON(event)) {
-		int len;
-		struct module *algo;
-		struct sst_algo_control *bc;
-		struct sst_cmd_set_params *cmd;
-
-		algo = list_first_entry(&ids->algo_list, struct module, node);
-		if (algo == NULL)
-			return -EINVAL;
-		bc = (void *)algo->kctl->private_value;
-		len = sizeof(cmd->dst) + sizeof(cmd->command_id) + bc->max;
-
-		cmd = kzalloc(len, GFP_KERNEL);
-		if (cmd == NULL) {
-			pr_err("Failed to send cmd, kzalloc failed\n");
-			return -ENOMEM;
-		}
-
-		SST_FILL_DESTINATION(2, cmd->dst, bc->pipe_id, bc->module_id);
-		cmd->command_id = bc->cmd_id;
-		memcpy(cmd->params, bc->params, bc->max);
-
-		sst_fill_and_send_cmd(sst, SST_IPC_IA_CMD, SST_FLAG_BLOCKED,
-				      bc->task_id, 0, cmd, len);
-		kfree(cmd);
-		sst_set_pipe_gain(ids, sst, 0);
-	} else {
-		SST_FILL_DESTINATION(2, cmd.header.dst,
-				     SST_PATH_INDEX_RESERVED, SST_MODULE_ID_TONE_GEN);
-
-		cmd.header.command_id = SBA_VB_STOP_TONE;
-		cmd.header.length = sizeof(struct sst_cmd_tone_stop)
-					 - sizeof(struct sst_dsp_header);
-		cmd.switch_state = SST_SWITCH_OFF;
-		sst_fill_and_send_cmd(sst, SST_IPC_IA_CMD, SST_FLAG_BLOCKED,
-				      SST_TASK_SBA, 0, &cmd,
-				      sizeof(cmd.header) + cmd.header.length);
-	}
-	return 0;
-}
-
-static int sst_send_probe_cmd(struct sst_data *sst, u16 probe_pipe_id,
-			      int mode, int switch_state,
-			      const struct sst_probe_config *probe_cfg)
-{
-	struct sst_cmd_probe cmd;
-
-	memset(&cmd, 0, sizeof(cmd));
-
-	SST_FILL_DESTINATION(3, cmd.header.dst, SST_DEFAULT_CELL_NBR,
-			     probe_pipe_id, SST_DEFAULT_MODULE_ID);
-	cmd.header.command_id = SBA_PROBE;
-	cmd.header.length = sizeof(struct sst_cmd_probe)
-				 - sizeof(struct sst_dsp_header);
-	cmd.switch_state = switch_state;
-
-	SST_FILL_DESTINATION(2, cmd.probe_dst,
-			     probe_cfg->loc_id, probe_cfg->mod_id);
-
-	cmd.shared_mem = 1;
-	cmd.probe_in = 0;
-	cmd.probe_out = 0;
-
-	cmd.probe_mode = mode;
-	cmd.cfg.s_length = probe_cfg->cfg.s_length;
-	cmd.cfg.rate = probe_cfg->cfg.rate;
-	cmd.cfg.format = probe_cfg->cfg.format;
-	cmd.sm_buf_id = 1;
-
-	return sst_fill_and_send_cmd(sst, SST_IPC_IA_CMD, SST_FLAG_BLOCKED,
-				     probe_cfg->task_id, 0, &cmd,
-				     sizeof(cmd.header) + cmd.header.length);
-}
-
-static const struct snd_kcontrol_new sst_probe_controls[];
-static const struct sst_probe_config sst_probes[];
-
-#define SST_MAX_PROBE_STREAMS 8
-int sst_dpcm_probe_send(struct snd_soc_platform *platform, u16 probe_pipe_id,
-			int substream, int direction, bool on)
-{
-	int switch_state = on ? SST_SWITCH_ON : SST_SWITCH_OFF;
-	struct sst_data *sst = snd_soc_platform_get_drvdata(platform);
-	const struct sst_probe_config *probe_cfg;
-	struct sst_probe_value *probe_val;
-	char *type;
-	int offset;
-	int mode;
-
-	if (direction == SNDRV_PCM_STREAM_CAPTURE) {
-		mode = SST_PROBE_EXTRACTOR;
-		offset = 0;
-		type = "extractor";
-	} else {
-		mode = SST_PROBE_INJECTOR;
-		offset = SST_MAX_PROBE_STREAMS;
-		type = "injector";
-	}
-	/* get the value of the probe connection kcontrol */
-	probe_val = (void *)sst_probe_controls[substream + offset].private_value;
-	probe_cfg = &sst_probes[probe_val->val];
-
-	pr_debug("%s: substream=%d, direction=%d\n", __func__, substream, direction);
-	pr_debug("%s: %s probe point at %s\n", __func__, type, probe_cfg->name);
-
-	return sst_send_probe_cmd(sst, probe_pipe_id, mode, switch_state, probe_cfg);
-}
-
-/**
- * sst_alloc_hostless_stream - send ALLOC for a stream
- *
- * The stream does not send data to IA. The data is consumed by an internal
- * sink.
- */
-static int sst_alloc_hostless_stream(const struct sst_pcm_format *pcm_params,
-				     int str_id, uint pipe_id, uint task_id)
-{
-	struct snd_sst_stream_params param;
-	struct snd_sst_params str_params = {0};
-	struct snd_sst_alloc_params_ext alloc_params = {0};
-	int ret_val = 0;
-
-	memset(&param.uc.pcm_params, 0, sizeof(param.uc.pcm_params));
-	param.uc.pcm_params.num_chan = pcm_params->channels_max;
-	param.uc.pcm_params.pcm_wd_sz = pcm_params->sample_bits;
-	param.uc.pcm_params.sfreq = pcm_params->rate_min;
-	pr_debug("%s: sfreq= %d, wd_sz = %d\n", __func__,
-		 param.uc.pcm_params.sfreq, param.uc.pcm_params.pcm_wd_sz);
-
-	str_params.sparams = param;
-	str_params.aparams = alloc_params;
-	str_params.codec = SST_CODEC_TYPE_PCM;
-
-	/* fill the pipe_id and stream id to pass to SST driver */
-	str_params.stream_type = SST_STREAM_TYPE_MUSIC;
-	str_params.stream_id = str_id;
-	str_params.device_type = pipe_id;
-	str_params.task = task_id;
-	str_params.ops = STREAM_OPS_CAPTURE;
-
-	ret_val = sst_dsp->ops->open(&str_params);
-	pr_debug("platform prepare: stream open ret_val = 0x%x\n", ret_val);
-	if (ret_val <= 0)
-		return ret_val;
-
-	return ret_val;
-}
-
-static int sst_hostless_stream_event(struct snd_soc_dapm_widget *w,
-					struct snd_kcontrol *k, int event)
-{
-	struct sst_ids *ids = w->priv;
-
-#define MERR_DPCM_HOSTLESS_STRID 25
-	if (SND_SOC_DAPM_EVENT_ON(event))
-		/* ALLOC */
-		/* FIXME: HACK - FW shouldn't require alloc for aware */
-		return sst_alloc_hostless_stream(ids->pcm_fmt,
-						 MERR_DPCM_HOSTLESS_STRID,
-						 ids->location_id >> SST_PATH_ID_SHIFT,
-						 ids->task_id);
-	else
-		/* FREE */
-		return sst_dsp->ops->close(MERR_DPCM_HOSTLESS_STRID);
-}
-
-static const struct snd_kcontrol_new sst_mix_sw_aware =
-	SOC_SINGLE_EXT("switch", SST_MIX_SWITCH, 0, 1, 0,
-		sst_mix_get, sst_mix_put);
-
-static const struct snd_kcontrol_new sst_mix_sw_vad =
-	SOC_SINGLE_EXT("switch", SST_MIX_SWITCH, 0, 1, 0,
-		sst_mix_get, sst_mix_put);
-
-static const struct snd_kcontrol_new sst_vad_enroll[] = {
-	SOC_SINGLE_BOOL_EXT("SST VTSV Enroll", 0, sst_vtsv_enroll_get,
-					sst_vtsv_enroll_set),
-};
-
-static const struct snd_kcontrol_new sst_mix_sw_tone_gen =
-	SOC_SINGLE_EXT("switch", SST_MIX_SWITCH, 1, 1, 0,
-		sst_mix_get, sst_mix_put);
-
-static const char * const sst_bt_fm_texts[] = {
-	"fm", "bt",
-};
-
-static const struct snd_kcontrol_new sst_bt_fm_mux =
-	SST_SSP_MUX_CTL("ssp1_out", 0, SST_MUX_REG, SST_BT_FM_MUX_SHIFT, sst_bt_fm_texts,
-			sst_mux_get, sst_mux_put);
-
-static const struct sst_pcm_format aware_stream_fmt = {
-	.sample_bits = 24,
-	.rate_min = 8000,
-	.channels_max = 1,
-};
-
-static const struct sst_pcm_format vad_stream_fmt = {
-	.sample_bits = 16,
-	.rate_min = 16000,
-	.channels_max = 1,
-};
+#define SST_SSP_CFG(wssp_no)								\
+	(const struct sst_ssp_cfg){ .ssp_config = &sst_ssp_configs[wssp_no],		\
+				    .ssp_number = wssp_no,				\
+				    .mux_shift = &sst_ssp_mux_shift[wssp_no],		\
+				    .domain_shift = &sst_ssp_domain_shift[wssp_no], }
 
 static const struct snd_soc_dapm_widget sst_dapm_widgets[] = {
 	SND_SOC_DAPM_INPUT("tone"),
-	SST_DAPM_OUTPUT("aware", SST_PATH_INDEX_AWARE_OUT, SST_TASK_AWARE, &aware_stream_fmt, sst_hostless_stream_event),
-	SST_DAPM_OUTPUT("vad", SST_PATH_INDEX_VAD_OUT, SST_TASK_AWARE, &vad_stream_fmt, sst_hostless_stream_event),
-	SST_AIF_IN("modem_in",  sst_set_be_modules),
-	SST_AIF_IN("codec_in0", sst_set_be_modules),
-	SST_AIF_IN("codec_in1", sst_set_be_modules),
-	SST_AIF_IN("bt_fm_in", sst_set_be_modules),
-	SST_AIF_OUT("modem_out", sst_set_be_modules),
-	SST_AIF_OUT("codec_out0", sst_set_be_modules),
-	SST_AIF_OUT("codec_out1", sst_set_be_modules),
-	SST_AIF_OUT("bt_fm_out", sst_set_be_modules),
+	SND_SOC_DAPM_OUTPUT("aware"),
+	SND_SOC_DAPM_OUTPUT("vad"),
+	SST_SSP_INPUT("modem_in",  sst_ssp_event, SST_SSP_CFG(SST_SSP0)),
+	SST_SSP_AIF_IN("codec_in0", sst_ssp_event, SST_SSP_CFG(SST_SSP2)),
+	SST_SSP_AIF_IN("codec_in1", sst_ssp_event, SST_SSP_CFG(SST_SSP2)),
+	SST_SSP_INPUT("bt_fm_in", sst_ssp_event, SST_SSP_CFG(SST_SSP1)),
+	SST_SSP_OUTPUT("modem_out", sst_ssp_event, SST_SSP_CFG(SST_SSP0)),
+	SST_SSP_AIF_OUT("codec_out0", sst_ssp_event, SST_SSP_CFG(SST_SSP2)),
+	SST_SSP_AIF_OUT("codec_out1", sst_ssp_event, SST_SSP_CFG(SST_SSP2)),
+	SST_SSP_OUTPUT("bt_fm_out", sst_ssp_event, SST_SSP_CFG(SST_SSP1)),
 
 	/* Media Paths */
 	/* MediaX IN paths are set via ALLOC, so no SET_MEDIA_PATH command */
-	SST_PATH_INPUT("media0_in", SST_TASK_MMX, SST_SWM_IN_MEDIA0, sst_generic_modules_event),
+	SST_PATH_INPUT("media0_in", SST_TASK_MMX, SST_SWM_IN_MEDIA0, NULL),
 	SST_PATH_INPUT("media1_in", SST_TASK_MMX, SST_SWM_IN_MEDIA1, NULL),
 	SST_PATH_INPUT("media2_in", SST_TASK_MMX, SST_SWM_IN_MEDIA2, sst_set_media_path),
 	SST_PATH_INPUT("media3_in", SST_TASK_MMX, SST_SWM_IN_MEDIA3, NULL),
@@ -1431,15 +1168,15 @@ static const struct snd_soc_dapm_widget sst_dapm_widgets[] = {
 	SST_PATH_MEDIA_LOOP_OUTPUT("media_loop1_out", SST_TASK_SBA, SST_SWM_OUT_MEDIA_LOOP1, SST_FMT_MONO, sst_set_media_loop),
 	SST_PATH_MEDIA_LOOP_OUTPUT("media_loop2_out", SST_TASK_SBA, SST_SWM_OUT_MEDIA_LOOP2, SST_FMT_STEREO, sst_set_media_loop),
 
-	SST_PATH_INPUT("tone_in", SST_TASK_SBA, SST_SWM_IN_TONE, sst_tone_generator_event),
-
-	SST_PATH_LINKED_INPUT("bt_in", SST_TASK_SBA, SST_SWM_IN_BT, "bt_fm_in", sst_set_linked_pipe),
-	SST_PATH_LINKED_INPUT("fm_in", SST_TASK_SBA, SST_SWM_IN_FM, "bt_fm_in", sst_set_linked_pipe),
-	SST_PATH_LINKED_OUTPUT("bt_out", SST_TASK_SBA, SST_SWM_OUT_BT, "bt_fm_out", sst_set_linked_pipe),
-	SST_PATH_LINKED_OUTPUT("fm_out", SST_TASK_SBA, SST_SWM_OUT_FM, "bt_fm_out", sst_set_linked_pipe),
+	/* TODO: need to send command */
+	SST_PATH_INPUT("sidetone_in", SST_TASK_SBA, SST_SWM_IN_SIDETONE, NULL),
+	SST_PATH_INPUT("tone_in", SST_TASK_SBA, SST_SWM_IN_TONE, NULL),
+	SST_PATH_INPUT("bt_in", SST_TASK_SBA, SST_SWM_IN_BT, NULL),
+	SST_PATH_INPUT("fm_in", SST_TASK_SBA, SST_SWM_IN_FM, NULL),
+	SST_PATH_OUTPUT("bt_out", SST_TASK_SBA, SST_SWM_OUT_BT, NULL),
+	SST_PATH_OUTPUT("fm_out", SST_TASK_SBA, SST_SWM_OUT_FM, NULL),
 
 	/* SBA Voice Paths */
-	SST_PATH_LINKED_INPUT("sidetone_in", SST_TASK_SBA, SST_SWM_IN_SIDETONE, "speech_out", sst_set_linked_pipe),
 	SST_PATH_INPUT("speech_in", SST_TASK_SBA, SST_SWM_IN_SPEECH, sst_set_speech_path),
 	SST_PATH_INPUT("txspeech_in", SST_TASK_SBA, SST_SWM_IN_TXSPEECH, sst_set_speech_path),
 	SST_PATH_OUTPUT("hf_sns_out", SST_TASK_SBA, SST_SWM_OUT_HF_SNS, sst_set_speech_path),
@@ -1498,11 +1235,12 @@ static const struct snd_soc_dapm_widget sst_dapm_widgets[] = {
 	SST_SWM_MIXER("modem_out mix 0", SST_MIX_MODEM, SST_TASK_SBA, SST_SWM_OUT_MODEM,
 		      sst_mix_modem_controls, sst_swm_mixer_event),
 
-	SND_SOC_DAPM_MUX("ssp1_out mux 0", SND_SOC_NOPM, 0, 0, &sst_bt_fm_mux),
 	SND_SOC_DAPM_SWITCH("aware_out aware 0", SND_SOC_NOPM, 0, 0, &sst_mix_sw_aware),
-	SND_SOC_DAPM_SWITCH("vad_out vad 0", SND_SOC_NOPM, 0, 0, &sst_mix_sw_vad),
+	SND_SOC_DAPM_MUX("ssp1_out mux 0", SND_SOC_NOPM, 0, 0, &sst_bt_fm_mux),
 
-	SND_SOC_DAPM_SWITCH("tone_in tone_generator 0", SND_SOC_NOPM, 0, 0, &sst_mix_sw_tone_gen),
+	SND_SOC_DAPM_SUPPLY("VBTimer", SND_SOC_NOPM, 0, 0,
+			    sst_vb_trigger_event,
+			    SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
 };
 
 static const struct snd_soc_dapm_route intercon[] = {
@@ -1554,8 +1292,7 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"aware_out aware 0", "switch", "aware_out mix 0"},
 	SST_SBA_MIXER_GRAPH_MAP("aware_out mix 0"),
 	{"vad", NULL, "vad_out"},
-	{"vad_out", NULL, "vad_out vad 0"},
-	{"vad_out vad 0", "switch", "vad_out mix 0"},
+	{"vad_out", NULL, "vad_out mix 0"},
 	SST_SBA_MIXER_GRAPH_MAP("vad_out mix 0"),
 
 	{"codec_out0", NULL, "codec_out0 mix 0"},
@@ -1579,7 +1316,6 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"txspeech_in", NULL, "hf_sns_out"},
 	{"txspeech_in", NULL, "hf_out"},
 	{"txspeech_in", NULL, "speech_out"},
-	{"sidetone_in", NULL, "speech_out"},
 
 	{"hf_sns_out", NULL, "hf_sns_out mix 0"},
 	SST_SBA_MIXER_GRAPH_MAP("hf_sns_out mix 0"),
@@ -1593,11 +1329,19 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"rxspeech_out", NULL, "rxspeech_out mix 0"},
 	SST_SBA_MIXER_GRAPH_MAP("rxspeech_out mix 0"),
 
-	{"tone_in", NULL, "tone_in tone_generator 0"},
-	{"tone_in tone_generator 0", "switch", "tone"},
-
-	/* TODO: add sidetone inputs */
+	/* TODO: add Tone inputs */
 	/* TODO: add Low Latency stream support */
+
+	{"Headset Capture", NULL, "VBTimer"},
+	{"Headset Playback", NULL, "VBTimer"},
+	{"Deepbuffer Playback", NULL, "VBTimer"},
+	{"Compress Playback", NULL, "VBTimer"},
+	{"VOIP Playback", NULL, "VBTimer"},
+	{"aware", NULL, "VBTimer"},
+	{"modem_in", NULL, "VBTimer"},
+	{"modem_out", NULL, "VBTimer"},
+	{"bt_fm_in", NULL, "VBTimer"},
+	{"bt_fm_out", NULL, "VBTimer"},
 };
 
 static const char * const sst_nb_wb_texts[] = {
@@ -1624,11 +1368,11 @@ static const char * const channel_names[] = {
 };
 
 #define SST_INTERLEAVER(xpname, slot_name, slotno) \
-	SST_SSP_SLOT_CTL(xpname, "interleaver", slot_name, slotno, true, \
+	SST_SSP_SLOT_CTL(xpname, "interleaver", slot_name, slotno, 1, \
 			 channel_names, sst_slot_get, sst_slot_put)
 
 #define SST_DEINTERLEAVER(xpname, channel_name, channel_no) \
-	SST_SSP_SLOT_CTL(xpname, "deinterleaver", channel_name, channel_no, false, \
+	SST_SSP_SLOT_CTL(xpname, "deinterleaver", channel_name, channel_no, 0, \
 			 slot_names, sst_slot_get, sst_slot_put)
 
 static const struct snd_kcontrol_new sst_slot_controls[] = {
@@ -1642,10 +1386,45 @@ static const struct snd_kcontrol_new sst_slot_controls[] = {
 	SST_DEINTERLEAVER("codec_in", "codec_in1_1", 3),
 };
 
-#include "probe_point_dpcm.c"
+#define SST_NUM_PROBE_CONNECTION_PTS 31
+static const struct sst_probe_config sst_probes[SST_NUM_PROBE_CONNECTION_PTS] = {
+	/* TODO: get this struct from FW config data */
+	/* TODO: only gain outputs supported currently */
+	{ "media0_in gain", SST_PATH_INDEX_MEDIA0_IN, SST_MODULE_ID_GAIN_CELL, SST_TASK_MMX, { 1, 2, 1 } },
+	{ "media1_in gain", SST_PATH_INDEX_MEDIA1_IN, SST_MODULE_ID_GAIN_CELL, SST_TASK_MMX, { 1, 2, 1 } },
+	{ "media2_in gain", SST_PATH_INDEX_MEDIA2_IN, SST_MODULE_ID_GAIN_CELL, SST_TASK_MMX, { 1, 2, 1 } },
+	{ "media3_in gain", SST_PATH_INDEX_MEDIA3_IN, SST_MODULE_ID_GAIN_CELL, SST_TASK_MMX, { 1, 2, 1 } },
+	{ "pcm0_in gain", SST_PATH_INDEX_PCM0_IN, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "pcm1_in gain", SST_PATH_INDEX_PCM1_IN, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "pcm1_out gain", SST_PATH_INDEX_PCM1_OUT, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "pcm2_out gain", SST_PATH_INDEX_PCM2_OUT, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "voip_in gain", SST_PATH_INDEX_VOIP_IN, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "voip_out gain", SST_PATH_INDEX_VOIP_OUT, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "aware_out gain", SST_PATH_INDEX_AWARE_OUT, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "vad_out gain", SST_PATH_INDEX_VAD_OUT, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "hf_sns_out gain", SST_PATH_INDEX_HF_SNS_OUT, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "hf_out gain", SST_PATH_INDEX_HF_OUT, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "speech_out gain", SST_PATH_INDEX_SPEECH_OUT, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "txspeech_in gain", SST_PATH_INDEX_TX_SPEECH_IN, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "rxspeech_out gain", SST_PATH_INDEX_RX_SPEECH_OUT, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "speech_in gain", SST_PATH_INDEX_SPEECH_IN, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "media_loop1_out gain", SST_PATH_INDEX_MEDIA_LOOP1_OUT , SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "media_loop2_out gain", SST_PATH_INDEX_MEDIA_LOOP2_OUT , SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "tone_in gain", SST_PATH_INDEX_TONE_IN, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "codec_out0 gain", SST_PATH_INDEX_CODEC_OUT0, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "codec_out1 gain", SST_PATH_INDEX_CODEC_OUT1, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "bt_out gain", SST_PATH_INDEX_BT_OUT, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "fm_out gain", SST_PATH_INDEX_FM_OUT, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "modem_out gain", SST_PATH_INDEX_MODEM_OUT, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "codec_in0 gain", SST_PATH_INDEX_CODEC_IN0, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "codec_in1 gain", SST_PATH_INDEX_CODEC_IN1, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "bt_in gain", SST_PATH_INDEX_BT_IN, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "fm_in gain", SST_PATH_INDEX_FM_IN, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+	{ "modem_in gain", SST_PATH_INDEX_MODEM_IN, SST_MODULE_ID_GAIN_CELL, SST_TASK_SBA, { 1, 2, 1 } },
+};
 
 /* initialized based on names in sst_probes array */
-static const char *sst_probe_enum_texts[ARRAY_SIZE(sst_probes)];
+static const char *sst_probe_enum_texts[SST_NUM_PROBE_CONNECTION_PTS];
 static const SOC_ENUM_SINGLE_EXT_DECL(sst_probe_enum, sst_probe_enum_texts);
 
 #define SST_PROBE_CTL(name, num)						\
@@ -1703,7 +1482,7 @@ static const struct snd_kcontrol_new sst_gain_controls[] = {
 	SST_GAIN("pcm1_in", SST_PATH_INDEX_PCM1_IN, SST_TASK_SBA, 0, &sst_gains[5]),
 	SST_GAIN("low_pcm0_in", SST_PATH_INDEX_LOW_PCM0_IN, SST_TASK_SBA, 0, &sst_gains[6]),
 	SST_GAIN("pcm1_out", SST_PATH_INDEX_PCM1_OUT, SST_TASK_SBA, 0, &sst_gains[7]),
-	SST_GAIN("pcm2_out", SST_PATH_INDEX_PCM2_OUT, SST_TASK_SBA, 0, &sst_gains[8]),
+	SST_GAIN("pcm2_out", SST_PATH_INDEX_PCM1_OUT, SST_TASK_SBA, 0, &sst_gains[8]),
 
 	SST_GAIN("voip_in", SST_PATH_INDEX_VOIP_IN, SST_TASK_SBA, 0, &sst_gains[9]),
 	SST_GAIN("voip_out", SST_PATH_INDEX_VOIP_OUT, SST_TASK_SBA, 0, &sst_gains[10]),
@@ -1738,17 +1517,17 @@ static const struct snd_kcontrol_new sst_gain_controls[] = {
 };
 
 static const struct snd_kcontrol_new sst_algo_controls[] = {
-	SST_ALGO_KCONTROL_BYTES("media_loop1_out", "fir", 272, SST_MODULE_ID_FIR_24,
+	SST_ALGO_KCONTROL_BYTES("media_loop1_out", "fir", 138, SST_MODULE_ID_FIR_24,
 		 SST_PATH_INDEX_MEDIA_LOOP1_OUT, 0, SST_TASK_SBA, SBA_VB_SET_FIR),
 	SST_ALGO_KCONTROL_BYTES("media_loop1_out", "iir", 300, SST_MODULE_ID_IIR_24,
 		SST_PATH_INDEX_MEDIA_LOOP1_OUT, 0, SST_TASK_SBA, SBA_VB_SET_IIR),
-	SST_ALGO_KCONTROL_BYTES("media_loop1_out", "mdrp", 286, SST_MODULE_ID_MDRP,
+	SST_ALGO_KCONTROL_BYTES("media_loop1_out", "mdrp", 76, SST_MODULE_ID_MDRP,
 		SST_PATH_INDEX_MEDIA_LOOP1_OUT, 0, SST_TASK_SBA, SBA_SET_MDRP),
 	SST_ALGO_KCONTROL_BYTES("media_loop2_out", "fir", 272, SST_MODULE_ID_FIR_24,
 		SST_PATH_INDEX_MEDIA_LOOP2_OUT, 0, SST_TASK_SBA, SBA_VB_SET_FIR),
 	SST_ALGO_KCONTROL_BYTES("media_loop2_out", "iir", 300, SST_MODULE_ID_IIR_24,
 		SST_PATH_INDEX_MEDIA_LOOP2_OUT, 0, SST_TASK_SBA, SBA_VB_SET_IIR),
-	SST_ALGO_KCONTROL_BYTES("media_loop2_out", "mdrp", 286, SST_MODULE_ID_MDRP,
+	SST_ALGO_KCONTROL_BYTES("media_loop2_out", "mdrp", 76, SST_MODULE_ID_MDRP,
 		SST_PATH_INDEX_MEDIA_LOOP2_OUT, 0, SST_TASK_SBA, SBA_SET_MDRP),
 	SST_ALGO_KCONTROL_BYTES("aware_out", "fir", 272, SST_MODULE_ID_FIR_24,
 		SST_PATH_INDEX_AWARE_OUT, 0, SST_TASK_SBA, SBA_VB_SET_FIR),
@@ -1760,38 +1539,34 @@ static const struct snd_kcontrol_new sst_algo_controls[] = {
 		SST_PATH_INDEX_VAD_OUT, 0, SST_TASK_SBA, SBA_VB_SET_FIR),
 	SST_ALGO_KCONTROL_BYTES("vad_out", "iir", 300, SST_MODULE_ID_IIR_24,
 		SST_PATH_INDEX_VAD_OUT, 0, SST_TASK_SBA, SBA_VB_SET_IIR),
-	SST_ALGO_KCONTROL_BYTES("vad_out", "vad", 28, SST_MODULE_ID_ALGO_VTSV,
-		SST_PATH_INDEX_VAD_OUT, 0, SST_TASK_AWARE, VAD_ENV_CLASS_PARAMS),
 	SST_ALGO_KCONTROL_BYTES("sprot_loop_out", "lpro", 192, SST_MODULE_ID_SPROT,
 		SST_PATH_INDEX_SPROT_LOOP_OUT, 0, SST_TASK_SBA, SBA_VB_LPRO),
-	SST_ALGO_KCONTROL_BYTES("modem_in", "dcr", 60, SST_MODULE_ID_FILT_DCR,
-		SST_PATH_INDEX_MODEM_IN, 0, SST_TASK_SBA, SBA_VB_SET_IIR),
-	SST_ALGO_KCONTROL_BYTES("bt_in", "dcr", 60, SST_MODULE_ID_FILT_DCR,
-		SST_PATH_INDEX_BT_IN, 0, SST_TASK_SBA, SBA_VB_SET_IIR),
-	SST_ALGO_KCONTROL_BYTES("codec_in0", "dcr", 52, SST_MODULE_ID_FILT_DCR,
+	SST_ALGO_KCONTROL_BYTES("codec_in0", "dcr", 300, SST_MODULE_ID_FILT_DCR,
 		SST_PATH_INDEX_CODEC_IN0, 0, SST_TASK_SBA, SBA_VB_SET_IIR),
-	SST_ALGO_KCONTROL_BYTES("codec_in1", "dcr", 52, SST_MODULE_ID_FILT_DCR,
+	SST_ALGO_KCONTROL_BYTES("codec_in1", "dcr", 300, SST_MODULE_ID_FILT_DCR,
 		SST_PATH_INDEX_CODEC_IN1, 0, SST_TASK_SBA, SBA_VB_SET_IIR),
-	SST_ALGO_KCONTROL_BYTES("fm_in", "dcr", 60, SST_MODULE_ID_FILT_DCR,
-		SST_PATH_INDEX_FM_IN, 0, SST_TASK_SBA, SBA_VB_SET_IIR),
 	/* Uplink */
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "fir_speech", 134, SST_MODULE_ID_FIR_16,
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "fir_speech", 136, SST_MODULE_ID_FIR_16,
 		SST_PATH_INDEX_SPEECH_OUT, 0, SST_TASK_FBA_UL, FBA_VB_SET_FIR),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "fir_hf_sns", 134, SST_MODULE_ID_FIR_16,
-		SST_PATH_INDEX_HF_SNS_OUT, 0, SST_TASK_FBA_UL, FBA_VB_SET_FIR | (0x0001<<11)),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "iir_speech", 46, SST_MODULE_ID_IIR_16,
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "fir_hf_sns", 136, SST_MODULE_ID_FIR_16,
+		SST_PATH_INDEX_HF_SNS_OUT, 0, SST_TASK_FBA_UL, FBA_VB_SET_FIR),
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "iir_speech", 48, SST_MODULE_ID_IIR_16,
 		SST_PATH_INDEX_SPEECH_OUT, 0, SST_TASK_FBA_UL, FBA_VB_SET_IIR),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "iir_hf_sns", 46, SST_MODULE_ID_IIR_16,
-		SST_PATH_INDEX_HF_SNS_OUT, 0, SST_TASK_FBA_UL, FBA_VB_SET_IIR | (0x0001<<11)),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "aec", 642, SST_MODULE_ID_AEC,
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "iir_hf_sns", 48, SST_MODULE_ID_IIR_16,
+		SST_PATH_INDEX_HF_SNS_OUT, 0, SST_TASK_FBA_UL, FBA_VB_SET_IIR),
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "aec", 640, SST_MODULE_ID_AEC,
 		SST_PATH_INDEX_SPEECH_OUT, 0, SST_TASK_FBA_UL, FBA_VB_AEC),
 	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "nr", 38, SST_MODULE_ID_NR,
 		SST_PATH_INDEX_SPEECH_OUT, 0, SST_TASK_FBA_UL, FBA_VB_NR_UL),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "agc", 62, SST_MODULE_ID_AGC,
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "agc", 58, SST_MODULE_ID_AGC,
 		SST_PATH_INDEX_SPEECH_OUT, 0, SST_TASK_FBA_UL, FBA_VB_AGC),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "compr", 100, SST_MODULE_ID_DRP,
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "biquad", 22, SST_MODULE_ID_DRP,
+		SST_PATH_INDEX_SPEECH_OUT, 0, SST_TASK_FBA_UL, FBA_VB_SET_BIQUAD_D_C),
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "compr", 36, SST_MODULE_ID_DRP,
 		SST_PATH_INDEX_SPEECH_OUT, 0, SST_TASK_FBA_UL, FBA_VB_DUAL_BAND_COMP),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "ser", 44, SST_MODULE_ID_SER,
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "sns", 324, SST_MODULE_ID_NR_SNS,
+		SST_PATH_INDEX_SPEECH_OUT, 0, SST_TASK_FBA_UL, FBA_VB_SNS),
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "ser", 42, SST_MODULE_ID_SER,
 		SST_PATH_INDEX_SPEECH_OUT, 0, SST_TASK_FBA_UL, FBA_VB_SER),
 	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "cni", 48, SST_MODULE_ID_CNI_TX,
 		SST_PATH_INDEX_SPEECH_OUT, 0, SST_TASK_FBA_UL, FBA_VB_TX_CNI),
@@ -1799,29 +1574,24 @@ static const struct snd_kcontrol_new sst_algo_controls[] = {
 		SST_PATH_INDEX_HF_OUT, 0, SST_TASK_FBA_UL, FBA_VB_SET_REF_LINE),
 	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "delay", 6, SST_MODULE_ID_EDL,
 		SST_PATH_INDEX_HF_OUT, 0, SST_TASK_FBA_UL, FBA_VB_SET_DELAY_LINE),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "bmf", 572, SST_MODULE_ID_BMF,
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "bmf", 264, SST_MODULE_ID_BMF,
 		SST_PATH_INDEX_HF_SNS_OUT, 0, SST_TASK_FBA_UL, FBA_VB_BMF),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "dnr", 56, SST_MODULE_ID_DNR,
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "dnr", 18, SST_MODULE_ID_DNR,
 		SST_PATH_INDEX_SPEECH_OUT, 0, SST_TASK_FBA_UL, FBA_VB_DNR),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "wnr", 64, SST_MODULE_ID_WNR,
-		SST_PATH_INDEX_SPEECH_OUT, 0, SST_TASK_FBA_UL, FBA_VB_WNR),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "tnr", 38, SST_MODULE_ID_TNR,
-		SST_PATH_INDEX_SPEECH_OUT, 0, SST_TASK_FBA_UL, FBA_VB_TNR_UL),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_out", "ul_module", "nlf", 236, SST_MODULE_ID_NLF,
-		SST_PATH_INDEX_SPEECH_OUT, 0, SST_TASK_FBA_UL, FBA_VB_NLF),
-
 	/* Downlink */
 	SST_COMBO_ALGO_KCONTROL_BYTES("speech_in", "dl_module", "ana", 52, SST_MODULE_ID_ANA,
 		SST_PATH_INDEX_SPEECH_IN, 0, SST_TASK_FBA_DL, FBA_VB_ANA),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_in", "dl_module", "fir", 134, SST_MODULE_ID_FIR_16,
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_in", "dl_module", "fir", 136, SST_MODULE_ID_FIR_16,
 		SST_PATH_INDEX_SPEECH_IN, 0, SST_TASK_FBA_DL, FBA_VB_SET_FIR),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_in", "dl_module", "iir", 46, SST_MODULE_ID_IIR_16,
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_in", "dl_module", "iir", 48, SST_MODULE_ID_IIR_16,
 		SST_PATH_INDEX_SPEECH_IN, 0, SST_TASK_FBA_DL, FBA_VB_SET_IIR),
 	SST_COMBO_ALGO_KCONTROL_BYTES("speech_in", "dl_module", "nr", 38, SST_MODULE_ID_NR,
 		SST_PATH_INDEX_SPEECH_IN, 0, SST_TASK_FBA_DL, FBA_VB_NR_DL),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_in", "dl_module", "compr", 100, SST_MODULE_ID_DRP,
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_in", "dl_module", "biquad", 22, SST_MODULE_ID_DRP,
+		SST_PATH_INDEX_SPEECH_IN, 0, SST_TASK_FBA_DL, FBA_VB_SET_BIQUAD_D_C),
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_in", "dl_module", "compr", 36, SST_MODULE_ID_DRP,
 		SST_PATH_INDEX_SPEECH_IN, 0, SST_TASK_FBA_DL, FBA_VB_DUAL_BAND_COMP),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_in", "dl_module", "cni", 28, SST_MODULE_ID_CNI,
+	SST_COMBO_ALGO_KCONTROL_BYTES("speech_in", "dl_module", "cni", 48, SST_MODULE_ID_CNI,
 		SST_PATH_INDEX_SPEECH_IN, 0, SST_TASK_FBA_DL, FBA_VB_RX_CNI),
 	SST_COMBO_ALGO_KCONTROL_BYTES("speech_in", "dl_module", "bwx", 54, SST_MODULE_ID_BWX,
 		SST_PATH_INDEX_SPEECH_IN, 0, SST_TASK_FBA_DL, FBA_VB_BWX),
@@ -1829,21 +1599,6 @@ static const struct snd_kcontrol_new sst_algo_controls[] = {
 		SST_PATH_INDEX_SPEECH_IN, 0, SST_TASK_FBA_DL, FBA_VB_GMM),
 	SST_COMBO_ALGO_KCONTROL_BYTES("speech_in", "dl_module", "glc", 18, SST_MODULE_ID_GLC,
 		SST_PATH_INDEX_SPEECH_IN, 0, SST_TASK_FBA_DL, FBA_VB_GLC),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_in", "dl_module", "tnr", 38, SST_MODULE_ID_TNR,
-		SST_PATH_INDEX_SPEECH_IN, 0, SST_TASK_FBA_DL, FBA_VB_TNR_DL),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_in", "dl_module", "slv", 34, SST_MODULE_ID_SLV,
-		SST_PATH_INDEX_SPEECH_IN, 0, SST_TASK_FBA_DL, FBA_VB_SLV),
-	SST_COMBO_ALGO_KCONTROL_BYTES("speech_in", "dl_module", "mdrp", 134, SST_MODULE_ID_MDRP,
-		SST_PATH_INDEX_SPEECH_IN, 0, SST_TASK_FBA_DL, FBA_VB_MDRP),
-
-	/* Tone Generator */
-	SST_ALGO_KCONTROL_BYTES("tone_in", "tone_generator", 116, SST_MODULE_ID_TONE_GEN,
-		SST_PATH_INDEX_RESERVED, 0, SST_TASK_SBA, SBA_VB_START_TONE),
-
-	/* Sidetone */
-	SST_ALGO_KCONTROL_BYTES("sidetone_in", "iir", 300, SST_MODULE_ID_IIR_24,
-		SST_PATH_INDEX_SIDETONE_IN, 0, SST_TASK_SBA, SBA_VB_SET_IIR),
-
 };
 
 static const struct snd_kcontrol_new sst_debug_controls[] = {
@@ -1864,13 +1619,6 @@ static inline bool is_sst_dapm_widget(struct snd_soc_dapm_widget *w)
 		return false;
 }
 
-/**
- * sst_send_pipe_gains - send gains for the front-end DAIs
- *
- * The gains in the pipes connected to the front-ends are muted/unmuted
- * automatically via the digital_mute() DAPM callback. This function sends the
- * gains for the front-end pipes.
- */
 int sst_send_pipe_gains(struct snd_soc_dai *dai, int stream, int mute)
 {
 	struct snd_soc_platform *platform = dai->platform;
@@ -1912,19 +1660,6 @@ int sst_send_pipe_gains(struct snd_soc_dai *dai, int stream, int mute)
 	return 0;
 }
 
-/**
- * sst_fill_module_list - populate the list of modules/gains for a pipe
- *
- *
- * Fills the widget pointer in the kcontrol private data, and also fills the
- * kcontrol pointer in the widget private data.
- *
- * Widget pointer is used to send the algo/gain in the .put() handler if the
- * widget is powerd on.
- *
- * Kcontrol pointer is used to send the algo/gain in the widget power ON/OFF
- * event handler. Each widget (pipe) has multiple algos stored in the algo_list.
- */
 static int sst_fill_module_list(struct snd_kcontrol *kctl,
 	 struct snd_soc_dapm_widget *w, int type)
 {
@@ -1954,14 +1689,6 @@ static int sst_fill_module_list(struct snd_kcontrol *kctl,
 	return 0;
 }
 
-/**
- * sst_fill_widget_module_info - fill list of gains/algos for the pipe
- * @widget:	pipe modelled as a DAPM widget
- *
- * Fill the list of gains/algos for the widget by looking at all the card
- * controls and comparing the name of the widget with the first part of control
- * name. First part of control name contains the pipe name (widget name).
- */
 static int sst_fill_widget_module_info(struct snd_soc_dapm_widget *w,
 	struct snd_soc_platform *platform)
 {
@@ -1987,14 +1714,6 @@ static int sst_fill_widget_module_info(struct snd_soc_dapm_widget *w,
 			 !strncmp(kctl->id.name, w->name, index)) {
 			struct sst_gain_mixer_control *mc = (void *)kctl->private_value;
 			mc->w = w;
-		} else if (strstr(kctl->id.name, "interleaver") &&
-			 !strncmp(kctl->id.name, w->name, index)) {
-			struct sst_enum *e = (void *)kctl->private_value;
-			e->w = w;
-		} else if (strstr(kctl->id.name, "deinterleaver") &&
-			 !strncmp(kctl->id.name, w->name, index)) {
-			struct sst_enum *e = (void *)kctl->private_value;
-			e->w = w;
 		}
 		if (ret < 0) {
 			up_read(&card->controls_rwsem);
@@ -2005,27 +1724,6 @@ static int sst_fill_widget_module_info(struct snd_soc_dapm_widget *w,
 	return 0;
 }
 
-/**
- * sst_fill_linked_widgets - fill the parent pointer for the linked widget
- */
-static void sst_fill_linked_widgets(struct snd_soc_platform *platform,
-						struct sst_ids *ids)
-{
-	struct snd_soc_dapm_widget *w;
-	struct snd_soc_dapm_context *dapm = &platform->dapm;
-
-	unsigned int len = strlen(ids->parent_wname);
-	list_for_each_entry(w, &dapm->card->widgets, list) {
-		if (!strncmp(ids->parent_wname, w->name, len)) {
-			ids->parent_w = w;
-			break;
-		}
-	}
-}
-
-/**
- * sst_map_modules_to_pipe - fill algo/gains list for all pipes
- */
 static int sst_map_modules_to_pipe(struct snd_soc_platform *platform)
 {
 	struct snd_soc_dapm_widget *w;
@@ -2036,15 +1734,12 @@ static int sst_map_modules_to_pipe(struct snd_soc_platform *platform)
 		if (w->platform && is_sst_dapm_widget(w) && (w->priv)) {
 			struct sst_ids *ids = w->priv;
 
-			pr_debug("widget type=%d name=%s\n", w->id, w->name);
+			pr_debug("widget type=%d name=%s", w->id, w->name);
 			INIT_LIST_HEAD(&ids->algo_list);
 			INIT_LIST_HEAD(&ids->gain_list);
 			ret = sst_fill_widget_module_info(w, platform);
 			if (ret < 0)
 				return ret;
-			/* fill linked widgets */
-			if (ids->parent_wname !=  NULL)
-				sst_fill_linked_widgets(platform, ids);
 		}
 	}
 	return 0;
@@ -2093,11 +1788,9 @@ int sst_dsp_init_v2_dpcm(struct snd_soc_platform *platform)
 			ARRAY_SIZE(sst_mux_controls));
 	snd_soc_add_platform_controls(platform, sst_debug_controls,
 			ARRAY_SIZE(sst_debug_controls));
-	snd_soc_add_platform_controls(platform, sst_vad_enroll,
-			ARRAY_SIZE(sst_vad_enroll));
 
 	/* initialize the names of the probe points */
-	for (i = 0; i < ARRAY_SIZE(sst_probes); i++)
+	for (i = 0; i < SST_NUM_PROBE_CONNECTION_PTS; i++)
 		sst_probe_enum_texts[i] = sst_probes[i].name;
 
 	snd_soc_add_platform_controls(platform, sst_probe_controls,

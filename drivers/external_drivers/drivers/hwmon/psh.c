@@ -117,6 +117,7 @@ f_out:
 	return ret;
 }
 
+extern struct soft_platform_id spid;
 int do_setup_ddr(struct device *dev)
 {
 	struct psh_ia_priv *ia_data =
@@ -132,7 +133,7 @@ int do_setup_ddr(struct device *dev)
 		};
 	static int fw_load_done;
 	int load_default = 0;
-	char fname[40];
+	char fname[20];
 
 	if (fw_load_done)
 		return 0;
@@ -141,6 +142,8 @@ int do_setup_ddr(struct device *dev)
 	intel_scu_ipc_msic_vprog2(1);
 	msleep(500);
 #endif
+	snprintf(fname, 20, "psh.bin.%04x.%04x", (int)spid.platform_family_id,
+			(int)spid.hardware_id);
 again:
 	if (!request_firmware(&fw_entry, fname, dev)) {
 		if (!fw_entry)

@@ -312,7 +312,7 @@ sharp5_cmd_set_brightness( struct mdfld_dsi_config *dsi_config, int level)
 		return -EINVAL;
 	}
 
-	duty_val = (0xFF * level) / 255;
+	duty_val = (0xFF * level) / 100;
 	mdfld_dsi_send_mcs_short_hs(sender,
 			write_display_brightness, duty_val, 1,
 			MDFLD_DSI_SEND_PACKAGE);
@@ -448,8 +448,8 @@ static void sharp5_cmd_get_panel_info(int pipe, struct panel_info *pi)
 	PSB_DEBUG_ENTRY("\n");
 
 	if (pipe == 0) {
-		pi->width_mm = 58;
-		pi->height_mm = 103;
+		pi->width_mm = PANEL_4DOT3_WIDTH;
+		pi->height_mm = PANEL_4DOT3_HEIGHT;
 	}
 }
 

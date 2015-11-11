@@ -38,9 +38,17 @@
 #define PUNIT_PORT			0x04
 #define NC_PM_SSS			0x3F
 
-/* SRAM locations to get S0ix count and residency */
-#define S0IX_COUNTERS_BASE	0xFFFFF500
-#define S0IX_COUNTERS_SIZE	(0x608 - 0x500)
+/* SRAM locations to get S0ix residency */
+#define S0I1_RES_ADDR		0xFFFFF560
+#define LPMP3_RES_ADDR		0xFFFFF578
+#define S0I2_RES_ADDR		0xFFFFF568
+#define S0I3_RES_ADDR		0xFFFFF570
+
+/* SRAM locations to get S0ix count */
+#define S0I1_COUNT_ADDR		0xFFFFF588
+#define LPMP3_COUNT_ADDR	0xFFFFF594
+#define S0I2_COUNT_ADDR		0xFFFFF58C
+#define S0I3_COUNT_ADDR		0xFFFFF590
 
 /* IPC commands to start, stop and
  * dump S0ix residency counters */

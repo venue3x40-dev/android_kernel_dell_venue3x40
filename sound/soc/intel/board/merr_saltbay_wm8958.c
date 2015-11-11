@@ -30,6 +30,7 @@
 #include <linux/async.h>
 #include <linux/delay.h>
 #include <linux/gpio.h>
+#include <asm/intel_scu_pmic.h>
 #include <asm/intel_mid_rpmsg.h>
 #include <asm/platform_mrfld_audio.h>
 #include <asm/intel_sst_mrfld.h>
@@ -44,6 +45,7 @@
 #include <linux/mfd/wm8994/registers.h>
 #include <linux/mfd/wm8994/pdata.h>
 #include "../../codecs/wm8994.h"
+#include <asm/intel_scu_ipcutil.h>
 
 /* Codec PLL output clk rate */
 #define CODEC_SYSCLK_RATE			24576000
@@ -63,8 +65,8 @@
 struct mrfld_8958_mc_private {
 	struct snd_soc_jack jack;
 	int jack_retry;
+	u8 pmic_id;
 	void __iomem    *osc_clk0_reg;
-	int spk_gpio;
 };
 
 
@@ -263,33 +265,52 @@ static int mrfld_8958_set_bias_level_post(struct snd_soc_card *card,
 	return ret;
 }
 
-static int mrfld_8958_set_spk_boost(struct snd_soc_dapm_widget *w,
+#define PMIC_ID_ADDR		0x00
+#define PMIC_CHIP_ID_A0_VAL	0xC0
+
+static int mrfld_8958_set_vflex_vsel(struct snd_soc_dapm_widget *w,
 				struct snd_kcontrol *k, int event)
 {
+#define VFLEXCNT		0xAB
+#define VFLEXVSEL_5V		0x01
+#define VFLEXVSEL_B0_VSYS_PT	0x80	/* B0: Vsys pass-through */
+#define VFLEXVSEL_A0_4P5V	0x41	/* A0: 4.5V */
+
 	struct snd_soc_dapm_context *dapm = w->dapm;
 	struct snd_soc_card *card = dapm->card;
 	struct mrfld_8958_mc_private *ctx = snd_soc_card_get_drvdata(card);
-	int ret = 0;
+
+	u8 vflexvsel, pmic_id = ctx->pmic_id;
+	int retval = 0;
 
 	pr_debug("%s: ON? %d\n", __func__, SND_SOC_DAPM_EVENT_ON(event));
 
-	if (SND_SOC_DAPM_EVENT_ON(event))
-		gpio_set_value((unsigned)ctx->spk_gpio, 1);
-	else if (SND_SOC_DAPM_EVENT_OFF(event))
-		gpio_set_value((unsigned)ctx->spk_gpio, 0);
+	vflexvsel = (pmic_id == PMIC_CHIP_ID_A0_VAL) ? VFLEXVSEL_A0_4P5V : VFLEXVSEL_B0_VSYS_PT;
+	pr_debug("pmic_id %#x vflexvsel %#x\n", pmic_id,
+		SND_SOC_DAPM_EVENT_ON(event) ? VFLEXVSEL_5V : vflexvsel);
 
-	return ret;
+	/*FIXME: seems to be issue with bypass mode in MOOR, for now
+		force the bias off volate as VFLEXVSEL_5V */
+	if ((INTEL_MID_BOARD(1, PHONE, MOFD)) ||
+			(INTEL_MID_BOARD(1, TABLET, MOFD)))
+		vflexvsel = VFLEXVSEL_5V;
+
+	if (SND_SOC_DAPM_EVENT_ON(event))
+		retval = intel_scu_ipc_iowrite8(VFLEXCNT, VFLEXVSEL_5V);
+	else if (SND_SOC_DAPM_EVENT_OFF(event))
+		retval = intel_scu_ipc_iowrite8(VFLEXCNT, vflexvsel);
+	if (retval)
+		pr_err("Error writing to VFLEXCNT register\n");
+
+	return retval;
 }
 
 static const struct snd_soc_dapm_widget widgets[] = {
 	SND_SOC_DAPM_HP("Headphones", NULL),
 	SND_SOC_DAPM_MIC("AMIC", NULL),
 	SND_SOC_DAPM_MIC("DMIC", NULL),
-};
-static const struct snd_soc_dapm_widget spk_boost_widget[] = {
-	/* DAPM route is added only for Moorefield */
-	SND_SOC_DAPM_SUPPLY("SPK_BOOST", SND_SOC_NOPM, 0, 0,
-			mrfld_8958_set_spk_boost,
+	SND_SOC_DAPM_SUPPLY("VFLEXCNT", SND_SOC_NOPM, 0, 0,
+			mrfld_8958_set_vflex_vsel,
 			SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
 };
 
@@ -321,13 +342,15 @@ static const struct snd_soc_dapm_route map[] = {
 	{ "Codec IN0", NULL, "AIF1ADC1R" },
 	{ "Codec IN1", NULL, "AIF1ADC1L" },
 	{ "Codec IN1", NULL, "AIF1ADC1R" },
-};
 
-static const struct snd_soc_dapm_route mofd_spk_boost_map[] = {
-	{"SPKOUTLP", NULL, "SPK_BOOST"},
-	{"SPKOUTLN", NULL, "SPK_BOOST"},
-	{"SPKOUTRP", NULL, "SPK_BOOST"},
-	{"SPKOUTRN", NULL, "SPK_BOOST"},
+	{ "AIF1DAC1L", NULL, "VFLEXCNT" },
+	{ "AIF1DAC1R", NULL, "VFLEXCNT" },
+	{ "AIF1DAC2L", NULL, "VFLEXCNT" },
+	{ "AIF1DAC2R", NULL, "VFLEXCNT" },
+
+	{ "AIF1ADC1L", NULL, "VFLEXCNT" },
+	{ "AIF1ADC1R", NULL, "VFLEXCNT" },
+
 };
 
 static const struct wm8958_micd_rate micdet_rates[] = {
@@ -446,7 +469,6 @@ static int mrfld_8958_init(struct snd_soc_pcm_runtime *runtime)
 	struct snd_soc_codec *codec = runtime->codec;
 	struct snd_soc_dapm_context *dapm = &codec->dapm;
 	struct snd_soc_card *card = runtime->card;
-	struct snd_soc_dapm_context *card_dapm = &card->dapm;
 	struct snd_soc_dai *aif1_dai = card->rtd[0].codec_dai;
 	struct mrfld_8958_mc_private *ctx = snd_soc_card_get_drvdata(card);
 
@@ -484,12 +506,6 @@ static int mrfld_8958_init(struct snd_soc_pcm_runtime *runtime)
 	snd_soc_dapm_nc_pin(dapm, "IN1RN");
 	snd_soc_dapm_nc_pin(dapm, "IN1RP");
 
-	if (ctx->spk_gpio >= 0) {
-		snd_soc_dapm_new_controls(card_dapm, spk_boost_widget,
-					ARRAY_SIZE(spk_boost_widget));
-		snd_soc_dapm_add_routes(card_dapm, mofd_spk_boost_map,
-				ARRAY_SIZE(mofd_spk_boost_map));
-	}
 	/* Force enable VMID to avoid cold latency constraints */
 	snd_soc_dapm_force_enable_pin(dapm, "VMID");
 	snd_soc_dapm_sync(dapm);
@@ -722,47 +738,20 @@ static struct snd_soc_card snd_soc_card_mrfld = {
 	.num_dapm_routes = ARRAY_SIZE(map),
 };
 
-static int snd_mrfld_8958_config_gpio(struct platform_device *pdev,
-					struct mrfld_8958_mc_private *drv)
-{
-	int ret = 0;
-
-	if (drv->spk_gpio >= 0) {
-		/* Set GPIO as output and init it with high value. So
-		 * spk boost is disable by default */
-		ret = devm_gpio_request_one(&pdev->dev, (unsigned)drv->spk_gpio,
-				GPIOF_INIT_LOW, "spk_boost");
-		if (ret) {
-			pr_err("GPIO request failed\n");
-			return ret;
-		}
-	}
-	return ret;
-}
-
+extern int intel_scu_ipc_msic_vprog3(int on);
 static int snd_mrfld_8958_mc_probe(struct platform_device *pdev)
 {
 	int ret_val = 0;
 	struct mrfld_8958_mc_private *drv;
-	struct mrfld_audio_platform_data *mrfld_audio_pdata = pdev->dev.platform_data;
 
 	pr_debug("Entry %s\n", __func__);
 
-	if (!mrfld_audio_pdata) {
-		pr_err("Platform data not provided\n");
-		return -EINVAL;
-	}
 	drv = kzalloc(sizeof(*drv), GFP_ATOMIC);
 	if (!drv) {
 		pr_err("allocation failed\n");
 		return -ENOMEM;
 	}
-	drv->spk_gpio = mrfld_audio_pdata->spk_gpio;
-	ret_val = snd_mrfld_8958_config_gpio(pdev, drv);
-	if (ret_val) {
-		pr_err("GPIO configuration failed\n");
-		goto unalloc;
-	}
+
 	/* ioremap the register */
 	drv->osc_clk0_reg = devm_ioremap_nocache(&pdev->dev,
 					MERR_OSC_CLKOUT_CTRL0_REG_ADDR,
@@ -772,6 +761,16 @@ static int snd_mrfld_8958_mc_probe(struct platform_device *pdev)
 		ret_val = -1;
 		goto unalloc;
 	}
+
+	ret_val = intel_scu_ipc_ioread8(PMIC_ID_ADDR, &drv->pmic_id);
+	if (ret_val) {
+		pr_err("Error reading PMIC ID register\n");
+		goto unalloc;
+	}
+
+	intel_scu_ipc_msic_vprog3(1);
+ 
+ 	printk("%s: enable vprog3\n", __func__);
 
 	/* register the soc card */
 	snd_soc_card_mrfld.dev = &pdev->dev;

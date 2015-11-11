@@ -2640,7 +2640,7 @@ static int sep_ioctl_get_ver_major(unsigned long arg)
 	u32 __user *ver_p = (u32 __user *)arg;
 	const u32 ver_major = DXDI_VER_MAJOR;
 
-	return put_user(ver_major, ver_p);
+	return __put_user(ver_major, ver_p);
 }
 
 static int sep_ioctl_get_ver_minor(unsigned long arg)
@@ -2648,7 +2648,7 @@ static int sep_ioctl_get_ver_minor(unsigned long arg)
 	u32 __user *ver_p = (u32 __user *)arg;
 	const u32 ver_minor = DXDI_VER_MINOR;
 
-	return put_user(ver_minor, ver_p);
+	return __put_user(ver_minor, ver_p);
 }
 
 static int sep_ioctl_get_sym_cipher_ctx_size(unsigned long arg)
@@ -2671,7 +2671,7 @@ static int sep_ioctl_get_sym_cipher_ctx_size(unsigned long arg)
 	     (sym_cipher_type <= _DXDI_SYMCIPHER_C2_LAST))
 	    ) {
 		pr_debug("sym_cipher_type=%u\n", sym_cipher_type);
-		return put_user(ctx_size, &(user_params->ctx_size));
+		return __put_user(ctx_size, &(user_params->ctx_size));
 	} else {
 		pr_err("Invalid cipher type=%u\n", sym_cipher_type);
 		return -EINVAL;
@@ -2696,7 +2696,7 @@ static int sep_ioctl_get_auth_enc_ctx_size(unsigned long arg)
 	}
 
 	pr_debug("A.E. type=%u\n", ae_type);
-	return put_user(ctx_size, &(user_params->ctx_size));
+	return __put_user(ctx_size, &(user_params->ctx_size));
 }
 
 static int sep_ioctl_get_mac_ctx_size(unsigned long arg)
@@ -2717,7 +2717,7 @@ static int sep_ioctl_get_mac_ctx_size(unsigned long arg)
 	}
 
 	pr_debug("MAC type=%u\n", mac_type);
-	return put_user(ctx_size, &(user_params->ctx_size));
+	return __put_user(ctx_size, &(user_params->ctx_size));
 }
 
 static int sep_ioctl_get_hash_ctx_size(unsigned long arg)
@@ -2738,7 +2738,7 @@ static int sep_ioctl_get_hash_ctx_size(unsigned long arg)
 	}
 
 	pr_debug("hash type=%u\n", hash_type);
-	return put_user(ctx_size, &(user_params->ctx_size));
+	return __put_user(ctx_size, &(user_params->ctx_size));
 }
 
 static int sep_ioctl_sym_cipher_init(struct sep_client_ctx *client_ctx,
@@ -2766,7 +2766,7 @@ static int sep_ioctl_sym_cipher_init(struct sep_client_ctx *client_ctx,
 
 	/* Even on SeP error the function above
 	 * returns 0 (operation completed with no host side errors) */
-	put_user(op_ctx.error_info, &(user_init_params->error_info));
+	__put_user(op_ctx.error_info, &(user_init_params->error_info));
 
 	op_ctx_fini(&op_ctx);
 
@@ -2796,7 +2796,7 @@ static int sep_ioctl_auth_enc_init(struct sep_client_ctx *client_ctx,
 				 ALG_CLASS_AUTH_ENC, &(init_params.props));
 	/* Even on SeP error the function above
 	 * returns 0 (operation completed with no host side errors) */
-	put_user(op_ctx.error_info, &(user_init_params->error_info));
+	__put_user(op_ctx.error_info, &(user_init_params->error_info));
 
 	op_ctx_fini(&op_ctx);
 
@@ -2826,7 +2826,7 @@ static int sep_ioctl_mac_init(struct sep_client_ctx *client_ctx,
 				 ALG_CLASS_MAC, &(init_params.props));
 	/* Even on SeP error the function above
 	 * returns 0 (operation completed with no host side errors) */
-	put_user(op_ctx.error_info, &(user_init_params->error_info));
+	__put_user(op_ctx.error_info, &(user_init_params->error_info));
 
 	op_ctx_fini(&op_ctx);
 
@@ -2856,7 +2856,7 @@ static int sep_ioctl_hash_init(struct sep_client_ctx *client_ctx,
 				 ALG_CLASS_HASH, &(init_params.hash_type));
 	/* Even on SeP error the function above
 	 * returns 0 (operation completed with no host side errors) */
-	put_user(op_ctx.error_info, &(user_init_params->error_info));
+	__put_user(op_ctx.error_info, &(user_init_params->error_info));
 
 	op_ctx_fini(&op_ctx);
 
@@ -2888,7 +2888,7 @@ static int sep_ioctl_proc_dblk(struct sep_client_ctx *client_ctx,
 			   dblk_params.data_in_size);
 	/* Even on SeP error the function above
 	 * returns 0 (operation completed with no host side errors) */
-	put_user(op_ctx.error_info, &(user_dblk_params->error_info));
+	__put_user(op_ctx.error_info, &(user_dblk_params->error_info));
 
 	op_ctx_fini(&op_ctx);
 
@@ -2924,11 +2924,11 @@ static int sep_ioctl_fin_proc(struct sep_client_ctx *client_ctx,
 	if (rc == 0) {
 		/* Always copy back digest/mac size + error_info */
 		/* (that's the reason for keeping them together)  */
-		rc = put_user(fin_params.digest_or_mac_size,
-			      &user_fin_params->digest_or_mac_size);
-		rc += put_user(fin_params.error_info,
-				 &user_fin_params->error_info);
-
+		rc = __copy_to_user(&(user_fin_params->digest_or_mac_size),
+				    &(fin_params.digest_or_mac_size),
+				    sizeof(struct dxdi_fin_process_params) -
+				    offsetof(struct dxdi_fin_process_params,
+					     digest_or_mac_size));
 		/* We always need to copy back the digest/mac size (even if 0)
 		 * in order to indicate validity of digest_or_mac buffer */
 	}
@@ -2937,7 +2937,7 @@ static int sep_ioctl_fin_proc(struct sep_client_ctx *client_ctx,
 		if (likely(fin_params.digest_or_mac_size <=
 			   DXDI_DIGEST_SIZE_MAX)) {
 			/* Copy back digest/mac if valid */
-			rc = copy_to_user(&(user_fin_params->digest_or_mac),
+			rc = __copy_to_user(&(user_fin_params->digest_or_mac),
 					    fin_params.digest_or_mac,
 					    fin_params.digest_or_mac_size);
 		} else {	/* Invalid digest/mac size! */
@@ -2950,7 +2950,7 @@ static int sep_ioctl_fin_proc(struct sep_client_ctx *client_ctx,
 
 	/* Even on SeP error the function above
 	 * returns 0 (operation completed with no host side errors) */
-	put_user(op_ctx.error_info, &(user_fin_params->error_info));
+	__put_user(op_ctx.error_info, &(user_fin_params->error_info));
 
 	op_ctx_fini(&op_ctx);
 
@@ -2979,7 +2979,7 @@ static int sep_ioctl_combined_init(struct sep_client_ctx *client_ctx,
 	rc = init_combined_context(&op_ctx, &(init_params.props));
 	/* Even on SeP error the function above
 	 * returns 0 (operation completed with no host side errors) */
-	put_user(op_ctx.error_info, &(user_init_params->error_info));
+	__put_user(op_ctx.error_info, &(user_init_params->error_info));
 
 	op_ctx_fini(&op_ctx);
 
@@ -3010,7 +3010,7 @@ static int sep_ioctl_combined_proc_dblk(struct sep_client_ctx *client_ctx,
 				    dblk_params.data_in_size);
 	/* Even on SeP error the function above
 	 * returns 0 (operation completed with no host side errors) */
-	put_user(op_ctx.error_info, &(user_dblk_params->error_info));
+	__put_user(op_ctx.error_info, &(user_dblk_params->error_info));
 
 	op_ctx_fini(&op_ctx);
 
@@ -3045,11 +3045,11 @@ static int sep_ioctl_combined_fin_proc(struct sep_client_ctx *client_ctx,
 	if (rc == 0) {
 		/* Always copy back digest size + error_info */
 		/* (that's the reason for keeping them together)  */
-		rc = put_user(fin_params.auth_data_size,
-			      &user_fin_params->auth_data_size);
-		rc += put_user(fin_params.error_info,
-				 &user_fin_params->error_info);
-
+		rc = __copy_to_user(&(user_fin_params->auth_data_size),
+				    &(fin_params.auth_data_size),
+				    sizeof(struct dxdi_combined_proc_params) -
+				    offsetof(struct dxdi_combined_proc_params,
+					     auth_data_size));
 		/* We always need to copy back the digest size (even if 0)
 		 * in order to indicate validity of digest buffer */
 	}
@@ -3059,7 +3059,7 @@ static int sep_ioctl_combined_fin_proc(struct sep_client_ctx *client_ctx,
 			   (fin_params.auth_data_size <=
 			    DXDI_DIGEST_SIZE_MAX))) {
 			/* Copy back auth if valid */
-			rc = copy_to_user(&(user_fin_params->auth_data),
+			rc = __copy_to_user(&(user_fin_params->auth_data),
 					    fin_params.auth_data,
 					    fin_params.auth_data_size);
 		}
@@ -3067,7 +3067,7 @@ static int sep_ioctl_combined_fin_proc(struct sep_client_ctx *client_ctx,
 
 	/* Even on SeP error the function above
 	 * returns 0 (operation completed with no host side errors) */
-	put_user(op_ctx.error_info, &(user_fin_params->error_info));
+	__put_user(op_ctx.error_info, &(user_fin_params->error_info));
 
 	op_ctx_fini(&op_ctx);
 
@@ -3101,10 +3101,11 @@ static int sep_ioctl_combined_proc(struct sep_client_ctx *client_ctx,
 	if (rc == 0) {
 		/* Always copy back digest size + error_info */
 		/* (that's the reason for keeping them together)  */
-		rc = put_user(params.auth_data_size,
-			      &user_params->auth_data_size);
-		rc += put_user(params.error_info, &user_params->error_info);
-
+		rc = __copy_to_user(&(user_params->auth_data_size),
+				    &(params.auth_data_size),
+				    sizeof(struct dxdi_combined_proc_params) -
+				    offsetof(struct dxdi_combined_proc_params,
+					     auth_data_size));
 		/* We always need to copy back the digest size (even if 0)
 		 * in order to indicate validity of digest buffer */
 	}
@@ -3113,15 +3114,15 @@ static int sep_ioctl_combined_proc(struct sep_client_ctx *client_ctx,
 		if (likely((params.auth_data_size > 0) &&
 			   (params.auth_data_size <= DXDI_DIGEST_SIZE_MAX))) {
 			/* Copy back auth if valid */
-			rc = copy_to_user(&(user_params->auth_data),
-					  params.auth_data,
-					  params.auth_data_size);
+			rc = __copy_to_user(&(user_params->auth_data),
+					    params.auth_data,
+					    params.auth_data_size);
 		}
 	}
 
 	/* Even on SeP error the function above
 	 * returns 0 (operation completed with no host side errors) */
-	put_user(op_ctx.error_info, &(user_params->error_info));
+	__put_user(op_ctx.error_info, &(user_params->error_info));
 
 	op_ctx_fini(&op_ctx);
 
@@ -3154,7 +3155,7 @@ static int sep_ioctl_sym_cipher_proc(struct sep_client_ctx *client_ctx,
 
 	/* Even on SeP error the function above
 	 * returns 0 (operation completed with no host side errors) */
-	put_user(op_ctx.error_info, &(user_params->error_info));
+	__put_user(op_ctx.error_info, &(user_params->error_info));
 
 	op_ctx_fini(&op_ctx);
 
@@ -3224,7 +3225,7 @@ static int sep_ioctl_auth_enc_proc(struct sep_client_ctx *client_ctx,
 
 	/* Even on SeP error the function above
 	 * returns 0 (operation completed with no host side errors) */
-	put_user(op_ctx.error_info, &(user_params->error_info));
+	__put_user(op_ctx.error_info, &(user_params->error_info));
 
 	op_ctx_fini(&op_ctx);
 
@@ -3258,9 +3259,11 @@ static int sep_ioctl_mac_proc(struct sep_client_ctx *client_ctx,
 	if (rc == 0) {
 		/* Always copy back mac size + error_info */
 		/* (that's the reason for keeping them together)  */
-		rc = put_user(params.mac_size, &user_params->mac_size);
-		rc += put_user(params.error_info, &user_params->error_info);
-
+		rc = __copy_to_user(&(user_params->mac_size),
+				    &(params.mac_size),
+				    sizeof(struct dxdi_mac_proc_params) -
+				    offsetof(struct dxdi_mac_proc_params,
+					     mac_size));
 		/* We always need to copy back the mac size (even if 0)
 		 * in order to indicate validity of mac buffer */
 	}
@@ -3269,8 +3272,8 @@ static int sep_ioctl_mac_proc(struct sep_client_ctx *client_ctx,
 		if (likely((params.mac_size > 0) &&
 			   (params.mac_size <= DXDI_DIGEST_SIZE_MAX))) {
 			/* Copy back mac if valid */
-			rc = copy_to_user(&(user_params->mac), params.mac,
-					  params.mac_size);
+			rc = __copy_to_user(&(user_params->mac), params.mac,
+					    params.mac_size);
 		} else {	/* Invalid mac size! */
 			pr_err("Got invalid MAC size = %u",
 				    params.mac_size);
@@ -3281,7 +3284,7 @@ static int sep_ioctl_mac_proc(struct sep_client_ctx *client_ctx,
 
 	/* Even on SeP error the function above
 	 * returns 0 (operation completed with no host side errors) */
-	put_user(op_ctx.error_info, &(user_params->error_info));
+	__put_user(op_ctx.error_info, &(user_params->error_info));
 
 	op_ctx_fini(&op_ctx);
 
@@ -3315,9 +3318,11 @@ static int sep_ioctl_hash_proc(struct sep_client_ctx *client_ctx,
 	if (rc == 0) {
 		/* Always copy back digest size + error_info */
 		/* (that's the reason for keeping them together)  */
-		rc = put_user(params.digest_size, &user_params->digest_size);
-		rc += put_user(params.error_info, &user_params->error_info);
-
+		rc = __copy_to_user(&(user_params->digest_size),
+				    &(params.digest_size),
+				    sizeof(struct dxdi_hash_proc_params) -
+				    offsetof(struct dxdi_hash_proc_params,
+					     digest_size));
 		/* We always need to copy back the digest size (even if 0)
 		 * in order to indicate validity of digest buffer */
 	}
@@ -3326,8 +3331,8 @@ static int sep_ioctl_hash_proc(struct sep_client_ctx *client_ctx,
 		if (likely((params.digest_size > 0) &&
 			   (params.digest_size <= DXDI_DIGEST_SIZE_MAX))) {
 			/* Copy back mac if valid */
-			rc = copy_to_user(&(user_params->digest),
-					  params.digest, params.digest_size);
+			rc = __copy_to_user(&(user_params->digest),
+					    params.digest, params.digest_size);
 		} else {	/* Invalid digest size! */
 			pr_err("Got invalid digest size = %u",
 				    params.digest_size);
@@ -3338,7 +3343,7 @@ static int sep_ioctl_hash_proc(struct sep_client_ctx *client_ctx,
 
 	/* Even on SeP error the function above
 	 * returns 0 (operation completed with no host side errors) */
-	put_user(op_ctx.error_info, &(user_params->error_info));
+	__put_user(op_ctx.error_info, &(user_params->error_info));
 
 	op_ctx_fini(&op_ctx);
 
@@ -3369,7 +3374,7 @@ static int sep_ioctl_sep_rpc(struct sep_client_ctx *client_ctx,
 			      params.mem_refs, params.rpc_params_size,
 			      params.rpc_params);
 
-	put_user(op_ctx.error_info, &(user_params->error_info));
+	__put_user(op_ctx.error_info, &(user_params->error_info));
 
 	op_ctx_fini(&op_ctx);
 
@@ -3412,8 +3417,8 @@ static int sep_ioctl_register_mem4dma(struct sep_client_ctx *client_ctx,
 		if (unlikely(!IS_VALID_MEMREF_IDX(params.memref_id))) {
 			rc = -ENOMEM;
 		} else {
-			rc = put_user(params.memref_id,
-				      &(user_params->memref_id));
+			rc = __put_user(params.memref_id,
+					&(user_params->memref_id));
 			if (rc != 0)	/* revert if failed __put_user */
 				(void)free_client_memref(client_ctx,
 							 params.memref_id);
@@ -3498,7 +3503,7 @@ static int sep_ioctl_get_iv(struct sep_client_ctx *client_ctx,
 	if (err != 0)
 		return err;
 
-	if (copy_to_user(user_params, &params,
+	if (__copy_to_user(user_params, &params,
 	    sizeof(struct dxdi_aes_iv_params))) {
 		pr_err("Failed writing input parameters");
 		return -EFAULT;
@@ -3540,9 +3545,6 @@ void init_client_ctx(struct queue_drvdata *drvdata,
 		mutex_init(&client_ctx->reg_memrefs[i].buf_lock);
 		/* The rest of the fields are 0/NULL from kzalloc */
 	}
-
-	init_waitqueue_head(&client_ctx->memref_wq);
-	client_ctx->memref_cnt = 0;
 }
 
 /**
@@ -4764,8 +4766,7 @@ static int sep_runtime_suspend(struct device *dev)
 	if (count >= SEP_TIMEOUT) {
 		dev_err(&pdev->dev,
 			"SEP: timed out waiting for chaabi_powerdown_en\n");
-		WARN_ON(1);
-		/*Let's continue to suspend as chaabi is not stable*/
+		return -EBUSY;
 	}
 
 	disable_irq(pdev->irq);

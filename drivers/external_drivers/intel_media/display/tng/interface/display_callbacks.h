@@ -58,7 +58,6 @@ void DCCBSetupZorder(struct drm_device *dev,
 			struct intel_dc_plane_zorder *zorder,
 			int pipe);
 void DCCBWaitForDbiFifoEmpty(struct drm_device *dev, int pipe);
-void DCCBAvoidFlipInVblankInterval(struct drm_device *dev, int pipe);
 int DCCBUpdateDbiPanel(struct drm_device *dev, int pipe);
 int DCCBOverlayDisableAndWait(struct drm_device *dev, u32 ctx,
 			int index);
@@ -77,8 +76,6 @@ int DCCBgttMapMemory(struct drm_device *dev,
 		     unsigned int ui32PagesNum, unsigned int *ui32Offset);
 int DCCBgttUnmapMemory(struct drm_device *dev,
 		       unsigned int hHandle, unsigned int ui32TaskId);
-int DCCBgttCleanupMemoryOnTask(struct drm_device *dev,
-				unsigned int ui32TaskId);
 bool DCChangeSwapChainProperty(unsigned long *psSwapChainGTTOffset,
 			int pipe);
 u32 DCCBGetPipeCount(void);

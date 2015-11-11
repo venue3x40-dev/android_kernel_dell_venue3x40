@@ -960,7 +960,7 @@ static const struct x86_cpu_id intel_idle_ids[] = {
 	ICPU(0x2f, idle_cpu_nehalem),
 	ICPU(0x2a, idle_cpu_snb),
 	ICPU(0x2d, idle_cpu_snb),
-	ICPU(0x4c, idle_cpu_chv),
+	ICPU(0x30, idle_cpu_chv),
 	ICPU(0x37, idle_cpu_vlv),
 	ICPU(0x3a, idle_cpu_ivb),
 	ICPU(0x3e, idle_cpu_ivb),
@@ -1076,7 +1076,7 @@ static int intel_idle_cpuidle_driver_init(void)
 		 * as these are not real C states supported by the CPU, they
 		 * are emulated c states for s0ix support.
 		*/
-		if ((mwait_cstate + 1) <= 6) {
+		if ((cstate + 1) < 6) {
 			num_substates = (mwait_substates >> ((mwait_cstate + 1) * 4))
 					& MWAIT_SUBSTATE_MASK;
 			if (num_substates == 0)
@@ -1084,7 +1084,7 @@ static int intel_idle_cpuidle_driver_init(void)
 		}
 
 #if !defined(CONFIG_ATOM_SOC_POWER)
-		if ((boot_cpu_data.x86_model != 0x37) && (boot_cpu_data.x86_model != 0x4c)) {
+		if (boot_cpu_data.x86_model != 0x37) {
 			/* if sub-state in table is not enumerated by CPUID */
 			if ((mwait_substate + 1) > num_substates)
 				continue;
@@ -1151,7 +1151,7 @@ static int intel_idle_cpu_init(int cpu)
 		 * as these are not real C states supported by the CPU, they
 		 * are emulated c states for s0ix support.
 		 */
-		if ((mwait_cstate + 1) <= 6) {
+		if ((cstate + 1) < 6) {
 			num_substates = (mwait_substates >> ((mwait_cstate + 1) * 4))
 					& MWAIT_SUBSTATE_MASK;
 			if (num_substates == 0)
@@ -1159,7 +1159,7 @@ static int intel_idle_cpu_init(int cpu)
 		}
 
 #if !defined(CONFIG_ATOM_SOC_POWER)
-		if ((boot_cpu_data.x86_model != 0x37) && (boot_cpu_data.x86_model != 0x4c)) {
+		if (boot_cpu_data.x86_model != 0x37) {
 			/* if sub-state in table is not enumerated by CPUID */
 			if ((mwait_substate + 1) > num_substates)
 				continue;
@@ -1214,6 +1214,18 @@ static int __init intel_idle_init(void)
 		if (retval) {
 			cpuidle_unregister_driver(&intel_idle_driver);
 			return retval;
+		}
+
+		if (platform_is(INTEL_ATOM_BYT)) {
+			/* Disable automatic core C6 demotion by PUNIT */
+			if (wrmsr_on_cpu(i, CLPU_CR_C6_POLICY_CONFIG,
+					DISABLE_CORE_C6_DEMOTION, 0x0))
+				pr_err("Error to disable core C6 demotion");
+
+			/* Disable automatic module C6 demotion by PUNIT */
+			if (wrmsr_on_cpu(i, CLPU_MD_C6_POLICY_CONFIG,
+					DISABLE_MODULE_C6_DEMOTION, 0x0))
+				pr_err("Error to disable module C6 demotion");
 		}
 	}
 	register_cpu_notifier(&cpu_hotplug_notifier);

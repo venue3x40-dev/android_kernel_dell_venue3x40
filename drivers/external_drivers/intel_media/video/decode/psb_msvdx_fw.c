@@ -175,6 +175,7 @@ static void psb_setup_fw_dump(struct drm_psb_private *dev_priv, uint32_t dma_cha
 	DRM_ERROR("MSVDX: Upload firmware MSVDX_RENDEC_READ_DATA_OFFSET value is 0x%x\n", PSB_RMSVDX32(MSVDX_RENDEC_READ_DATA_OFFSET));
 	DRM_ERROR("MSVDX: Upload firmware MSVDX_RENDEC_CONTEXT0_OFFSET value is 0x%x\n", PSB_RMSVDX32(MSVDX_RENDEC_CONTEXT0_OFFSET));
 	DRM_ERROR("MSVDX: Upload firmware MSVDX_RENDEC_CONTEXT1_OFFSET value is 0x%x\n", PSB_RMSVDX32(MSVDX_RENDEC_CONTEXT1_OFFSET));
+	DRM_ERROR("MSVDX: Upload firmware MSVDX_CMDS_END_SLICE_PICTURE_OFFSET value is 0x%x\n", PSB_RMSVDX32(MSVDX_CMDS_END_SLICE_PICTURE_OFFSET));
 
 	DRM_ERROR("MSVDX: Upload firmware MSVDX_MMU_MEM_REQ value is 0x%x\n", PSB_RMSVDX32(MSVDX_MMU_MEM_REQ_OFFSET));
 	DRM_ERROR("MSVDX: Upload firmware MSVDX_SYS_MEMORY_DEBUG2 value is 0x%x\n", PSB_RMSVDX32(0x6fc));
@@ -446,15 +447,6 @@ static int msvdx_get_fw_bo(struct drm_device *dev,
 		return 1;
 	}
 
-	/* there is 4 byte split between text and data,
-	 * also there is 4 byte guard after data */
-	if (((struct msvdx_fw *)ptr)->text_size + 8 +
-		((struct msvdx_fw *)ptr)->data_size >
-		msvdx_priv->mtx_mem_size) {
-		DRM_ERROR("MSVDX: fw size is bigger than mtx_mem_size.\n");
-		return 1;
-	}
-
 	rc = ttm_bo_kmap(msvdx_priv->fw, 0, (msvdx_priv->fw)->num_pages, &tmp_kmap);
 	if (rc) {
 		PSB_DEBUG_GENERAL("drm_bo_kmap failed: %d\n", rc);
@@ -607,7 +599,9 @@ int psb_setup_fw(struct drm_device *dev)
 	PSB_WMSVDX32(0, MSVDX_COMMS_TO_MTX_WRT_INDEX);
 	PSB_WMSVDX32(0, MSVDX_COMMS_FW_STATUS);
 #ifndef CONFIG_SLICE_HEADER_PARSING
-	PSB_WMSVDX32(RETURN_VDEB_DATA_IN_COMPLETION | NOT_ENABLE_ON_HOST_CONCEALMENT,
+	PSB_WMSVDX32(DSIABLE_IDLE_GPIO_SIG
+		| DSIABLE_Auto_CLOCK_GATING
+		| RETURN_VDEB_DATA_IN_COMPLETION | NOT_ENABLE_ON_HOST_CONCEALMENT,
 			MSVDX_COMMS_OFFSET_FLAGS);
 #else
 	/* decode flag should be set as 0 according to IMG's said */

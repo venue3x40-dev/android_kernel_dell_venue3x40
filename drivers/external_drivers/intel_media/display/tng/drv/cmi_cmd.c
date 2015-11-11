@@ -648,7 +648,7 @@ int mdfld_dsi_cmi_cmd_set_brightness(struct mdfld_dsi_config *dsi_config,
 		DRM_ERROR("Failed to get DSI packet sender\n");
 		return -EINVAL;
 	}
-	duty_val = (255 * level) / 255;
+	duty_val = (255 * level) / 100;
 	cmi_set_brightness[1] = duty_val;
 
 	mdfld_dsi_send_mcs_short_hs(sender,

@@ -86,15 +86,6 @@ struct PVR_SYNC_TIMELINE
 	atomic_t sValue;
 };
 
-struct PVR_SYNC_TL_TO_SIGNAL
-{
-	/* List entry support for the list of timelines which needs signaling */
-	struct list_head      sList;
-
-	/* The timeline to signal */
-	struct PVR_SYNC_TIMELINE *psPVRTl;
-};
-
 struct PVR_SYNC_KERNEL_SYNC_PRIM
 {
 	/* Base services sync prim structure */
@@ -332,10 +323,6 @@ static void PVRSyncValueStr(struct sync_pt *psPt,
                                                         char *str, int size)
 {
         struct PVR_SYNC_PT *psPVRPt = (struct PVR_SYNC_PT *)psPt;
-
-		if (!psPVRPt->psSyncData) {
-			return;
-		}
 
         /* This output is very compressed cause in the systrace case we just have
          * 32 chars and when printing it to /d/sync there are only 64 chars
@@ -1124,16 +1111,14 @@ static
 IMG_VOID PVRSyncUpdateAllTimelines(PVRSRV_CMDCOMP_HANDLE hCmdCompHandle)
 {
 	IMG_BOOL bSignal;
-	LIST_HEAD(sTlToSignalList);
-	struct PVR_SYNC_TL_TO_SIGNAL *psTlToSignal;
 	struct PVR_SYNC_TIMELINE *psPVRTl;
-	struct list_head *psTlEntry, *psPtEntry, *n;
+	struct list_head *psTlEntry, *psPtEntry;
 	unsigned long flags;
 
 	PVR_UNREFERENCED_PARAMETER(hCmdCompHandle);
 
 	mutex_lock(&gTlListLock);
-	list_for_each_safe(psTlEntry, n, &gTlList)
+	list_for_each(psTlEntry, &gTlList)
 	{
 		bSignal = IMG_FALSE;
 		psPVRTl =
@@ -1151,50 +1136,25 @@ IMG_VOID PVRSyncUpdateAllTimelines(PVRSRV_CMDCOMP_HANDLE hCmdCompHandle)
 			DPF("%s: check # %s", __func__,
 				_debugInfoPt(psPt));
 
-			/* Check for any points which weren't signaled before, but are now.
-			 * If so, mark it for signaling and stop processing this timeline. */
+			/* Check for any points which weren't signaled before, but
+			 * are now. If so, signal the timeline and stop processing
+			 * this timeline. */
 			if (   ((struct PVR_SYNC_PT *)psPt)->bSignaled == IMG_FALSE
 				&& PVRSyncHasSignaled(psPt))
 			{
 				DPF("%s: signal # %s", __func__,
 					_debugInfoPt(psPt));
-				/* Create a new entry for the list of timelines which needs to
-				 * be signaled. There are two reasons for not doing it right
-				 * now: It is not possible to signal the timeline while holding
-				 * the spinlock or the mutex. PVRSyncReleaseTimeline may be
-				 * called by timeline_signal which will acquire the mutex as
-				 * well and the spinlock itself is also used within
-				 * timeline_signal. */
+				/* Signal outside the spin lock. */
 				bSignal = IMG_TRUE;
 				break;
 			}
 		}
 		spin_unlock_irqrestore(&psPVRTl->obj.active_list_lock, flags);
 
-		if (bSignal) {
-			psTlToSignal = OSAllocMem(sizeof(struct PVR_SYNC_TL_TO_SIGNAL));
-			if (!psTlToSignal)
-				break;
-			psTlToSignal->psPVRTl = psPVRTl;
-			list_add_tail(&psTlToSignal->sList, &sTlToSignalList);
-		}
+		if (bSignal)
+			sync_timeline_signal((struct sync_timeline *)psPVRTl);
 	}
 	mutex_unlock(&gTlListLock);
-
-	/* It is safe to call timeline_signal at this point without holding the
-	 * timeline mutex. We know the timeline can't go away until we have called
-	 * timeline_signal cause the current active point still holds a kref to the
-	 * parent. However, when timeline_signal returns the actual timeline
-	 * structure may be invalid. */
-	list_for_each_safe(psTlEntry, n, &sTlToSignalList)
-	{
-		psTlToSignal =
-			container_of(psTlEntry, struct PVR_SYNC_TL_TO_SIGNAL, sList);
-
-		sync_timeline_signal((struct sync_timeline *)psTlToSignal->psPVRTl);
-		list_del(psTlEntry);
-		OSFreeMem(psTlToSignal);
-	}
 }
 
 IMG_INTERNAL

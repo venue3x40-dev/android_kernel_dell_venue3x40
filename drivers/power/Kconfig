@@ -180,20 +180,32 @@ config BATTERY_SBS
 	  Say Y to include support for SBS battery driver for SBS-compliant
 	  gas gauges.
 
-config BATTERY_BQ27x00
-	tristate "BQ27x00 battery driver"
-	depends on I2C || I2C=n
+config BATTERY_BQ27X00
+	tristate "BQ27X00 battery driver"
 	help
-	  Say Y here to enable support for batteries with BQ27x00 (I2C/HDQ) chips.
+	  Say Y here to enable support for batteries with BQ27X00 (I2C/HDQ) chips.
 
 config BATTERY_BQ27X00_I2C
 	bool "BQ27200/BQ27500 support"
-	depends on BATTERY_BQ27x00
+	depends on BATTERY_BQ27X00
 	depends on I2C
 	default y
 	help
 	  Say Y here to enable support for batteries with BQ27x00 (I2C) chips.
 
+config BATTERY_MODEL_WD3870127P
+	bool "WISEWOD battery model: WD3870127P, capacity is 4200mAh"
+	depends on BATTERY_BQ27X00
+	default n
+	help
+	  Say Y here to enable support for batteries specified
+
+config BATTERY_MODEL_SL3770125
+	bool "BYD battery model: SL3770125, capacity is 4100mAh"
+	depends on BATTERY_BQ27X00
+	default n
+	help
+	  Say Y here to enable support for batteries specified
 config BATTERY_BQ27X00_PLATFORM
 	bool "BQ27000 support"
 	depends on BATTERY_BQ27x00
@@ -364,6 +376,14 @@ config CHARGER_BQ2415X
 	  You'll need this driver to charge batteries on e.g. Nokia
 	  RX-51/N900.
 
+config CHARGER_SMB347
+	tristate "Summit Microelectronics SMB347 Battery Charger"
+	depends on I2C
+	select REGMAP_I2C
+	help
+	  Say Y to include support for Summit Microelectronics SMB347
+	  Battery Charger.
+
 config CHARGER_TPS65090
 	tristate "TPS65090 battery charger driver"
 	depends on MFD_TPS65090
@@ -398,6 +418,7 @@ config DC_XPWR_CHARGER
 	bool "Dollar Cove(Xpower) PMIC Charger driver"
 	help
 	  Say Y here to enable support for Dollar Cove(Xpower) PMIC Charger.
+
 
 source "drivers/power/reset/Kconfig"
 

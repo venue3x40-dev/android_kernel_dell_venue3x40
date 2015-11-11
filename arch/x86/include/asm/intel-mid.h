@@ -16,6 +16,7 @@
 #include <linux/sfi.h>
 #include <linux/pci.h>
 #include <linux/platform_device.h>
+#include <asm/spid.h>
 #include <asm/intel_mid_pcihelpers.h>
 
 #ifdef CONFIG_SFI
@@ -41,7 +42,6 @@ extern struct sfi_rtc_table_entry sfi_mrtc_array[];
 extern void *get_oem0_table(void);
 extern void register_rpmsg_service(char *name, int id, u32 addr);
 extern int sdhci_pci_request_regulators(void);
-extern unsigned int sfi_get_watchdog_irq(void);
 
 /* OEMB table */
 struct sfi_table_oemb {
@@ -58,6 +58,8 @@ struct sfi_table_oemb {
 	u8 scu_runtime_minor_version;
 	u8 ifwi_major_version;
 	u8 ifwi_minor_version;
+	struct soft_platform_id spid;
+	u8 ssn[INTEL_PLATFORM_SSN_SIZE];
 } __packed;
 
 /*
@@ -205,6 +207,22 @@ extern void intel_psh_devices_destroy(void);
 /*#define MRST_VRTC_PGOFFSET	(0xc00) */
 
 extern void intel_mid_rtc_init(void);
+
+enum intel_mid_sim_type {
+	INTEL_MID_CPU_SIMULATION_NONE = 0,
+	INTEL_MID_CPU_SIMULATION_VP,
+	INTEL_MID_CPU_SIMULATION_SLE,
+	INTEL_MID_CPU_SIMULATION_HVP,
+};
+extern enum intel_mid_sim_type __intel_mid_sim_platform;
+static inline enum intel_mid_sim_type intel_mid_identify_sim(void)
+{
+#ifdef CONFIG_X86_INTEL_MID
+	return __intel_mid_sim_platform;
+#else
+	return INTEL_MID_CPU_SIMULATION_NONE;
+#endif
+}
 
 #define INTEL_MID_IRQ_OFFSET 0x100
 

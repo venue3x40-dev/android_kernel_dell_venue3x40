@@ -149,31 +149,6 @@ void ospm_vsp_init(struct drm_device *dev,
 }
 
 /***********************************************************
- * slc workaround for ved
- ***********************************************************/
-/**
- * apply_ved_slc_workaround
- *
- * bypass SLC for ved if there is ctx that needs the workaround
- */
-#define GFX_WRAPPER_GBYPASSENABLE_SW 0x160854
-static void apply_ved_slc_workaround(struct drm_device *dev)
-{
-	struct drm_psb_private *dev_priv = psb_priv(dev);
-	struct msvdx_private *msvdx_priv = dev_priv->msvdx_private;
-
-	if (atomic_read(&msvdx_priv->vc1_workaround_ctx)) {
-		uint32_t reg, data;
-
-		/* soc.gfx_wrapper.gbypassenable_sw = 1 */
-		reg = GFX_WRAPPER_GBYPASSENABLE_SW - GFX_WRAPPER_OFFSET;
-		data = WRAPPER_REG_READ(reg);
-		data |= 0x1; /* Disable Bypass SLC for VED on MOFD */
-		WRAPPER_REG_WRITE(reg, data);
-	}
-}
-
-/***********************************************************
  * ved islands
  ***********************************************************/
 /**
@@ -187,11 +162,9 @@ static bool ved_power_up(struct drm_device *dev,
 	bool ret = true;
 	int pm_ret = 0;
 	unsigned int pci_device = dev->pci_device & 0xffff;
-	/* struct drm_psb_private *dev_priv = dev->dev_private; */
+	struct drm_psb_private *dev_priv = dev->dev_private;
 
 	PSB_DEBUG_PM("powering up ved\n");
-	apply_ved_slc_workaround(dev);
-
 #ifndef USE_GFX_INTERNAL_PM_FUNC
 	pm_ret = pmu_nc_set_power_state(PMU_DEC, OSPM_ISLAND_UP, VED_SS_PM0);
 #else
@@ -203,7 +176,7 @@ static bool ved_power_up(struct drm_device *dev,
 		return false;
 	}
 
-	/* iowrite32(0xffffffff, dev_priv->ved_wrapper_reg + 0); */
+	iowrite32(0xffffffff, dev_priv->ved_wrapper_reg + 0);
 
 	if (need_set_ved_freq && (pci_device != 0x1182)) {
 		if (!psb_msvdx_set_ved_freq(IP_FREQ_320_00))
@@ -240,7 +213,7 @@ static bool ved_power_down(struct drm_device *dev,
 	if (need_set_ved_freq && (pci_device != 0x1182)) {
 		if (!psb_msvdx_set_ved_freq(IP_FREQ_200_00))
 			PSB_DEBUG_PM("MSVDX: Set VED frequency to " \
-				"200MHZ before power down\n");
+				"200MHZ after power up\n");
 	}
 
 
@@ -288,9 +261,6 @@ static u32 vec_get_max_freq(struct drm_device *dev)
 	} else if (pci_device == 0x1182) {
 		max_freq = IP_FREQ_266_67;
 		PSB_DEBUG_PM("vec 1182 maximum freq is 400\n");
-	} else if (pci_device == 0x1480) {
-		max_freq = IP_FREQ_400_00;
-		PSB_DEBUG_PM("vec 1480 maximum freq is 400\n");
 	} else {
 		DRM_ERROR("invalid pci device id %x\n", pci_device);
 	}
@@ -321,13 +291,16 @@ static bool vec_power_up(struct drm_device *dev,
 		return false;
 	}
 
-	freq_max = vec_get_max_freq(dev);
+	if (IS_TNG_B0(dev))
+		freq_max = vec_get_max_freq(dev);
+	else
+		freq_max = IP_FREQ_320_00;
 
 	if (drm_vec_force_up_freq < 0) {
 		drm_vec_force_up_freq = 0;
 		freq_code = freq_max;
 	} else {
-		if (freq_max < drm_vec_force_up_freq)
+		if (freq_max > drm_vec_force_up_freq)
 			freq_code = drm_vec_force_up_freq;
 		else
 			freq_code = freq_max;
@@ -338,7 +311,7 @@ static bool vec_power_up(struct drm_device *dev,
 	else {
 		PSB_DEBUG_PM("TOPAZ: Fail to set VEC freq by code %d!\n",
 			freq_code);
-		/*return false;*/
+		return false;
 	}
 
 	if (drm_topaz_cgpolicy != PSB_CGPOLICY_ON)
@@ -385,7 +358,7 @@ static bool vec_power_down(struct drm_device *dev,
 	else {
 		PSB_DEBUG_PM("TOPAZ: Fail to set VEC freq by code %d!\n",
 			freq_code);
-		/*return false;*/
+		return false;
 	}
 
 #ifndef USE_GFX_INTERNAL_PM_FUNC
@@ -429,7 +402,7 @@ static int pm_cmd_freq_wait(u32 reg_freq, u32 *freq_code_rlzd)
 		freq_val = intel_mid_msgbus_read32(PUNIT_PORT, reg_freq);
 		if ((freq_val & IP_FREQ_VALID) == 0)
 			break;
-		if (tcount > 1500) {
+		if (tcount > 500) {
 			DRM_ERROR("P-Unit freq request wait timeout %x",
 				freq_val);
 			return -EBUSY;
@@ -503,9 +476,6 @@ static void vsp_set_max_frequency(struct drm_device *dev)
 	} else if (pci_device == 0x1480) {
 		max_freq_code = IP_FREQ_400_00;
 		PSB_DEBUG_PM("vsp maximum freq for ANN A0 is 400\n");
-	} else if (pci_device == 0x1182) {
-		PSB_DEBUG_PM("Max freq is the default freq 200MHZ for SKU3 \n");
-		max_freq_code = IP_FREQ_200_00;
 	} else {
 		DRM_ERROR("invalid pci device id %x\n", pci_device);
 		return;

@@ -275,7 +275,6 @@ void fixup_irqs(void)
 		affinity = data->affinity;
 		/* include IRQs who have no action, but are chained */
 		if ((!irq_has_action(irq) && !irq_is_chained(irq)) ||
-			irq_is_nested_thread(irq) ||
 			irqd_is_per_cpu(data) ||
 		    cpumask_subset(affinity, cpu_online_mask)) {
 			raw_spin_unlock(&desc->lock);

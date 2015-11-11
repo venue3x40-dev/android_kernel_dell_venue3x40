@@ -66,13 +66,9 @@ void drm_global_release(void)
 int drm_global_item_ref(struct drm_global_reference *ref)
 {
 	int ret;
-	struct drm_global_item *item;
+	struct drm_global_item *item = &glob[ref->global_type];
 	void *object;
 
-	if (ref->global_type >= DRM_GLOBAL_NUM)
-		return -EINVAL;
-
-	item = &glob[ref->global_type];
 	mutex_lock(&item->mutex);
 	if (item->refcount == 0) {
 		item->object = kzalloc(ref->size, GFP_KERNEL);
@@ -101,12 +97,8 @@ EXPORT_SYMBOL(drm_global_item_ref);
 
 void drm_global_item_unref(struct drm_global_reference *ref)
 {
-	struct drm_global_item *item;
+	struct drm_global_item *item = &glob[ref->global_type];
 
-	if (ref->global_type >= DRM_GLOBAL_NUM)
-		return;
-
-	item = &glob[ref->global_type];
 	mutex_lock(&item->mutex);
 	BUG_ON(item->refcount == 0);
 	BUG_ON(ref->object != item->object);

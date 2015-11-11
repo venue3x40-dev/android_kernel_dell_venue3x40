@@ -73,7 +73,6 @@
 #define  SDHCI_WRITE_PROTECT	0x00080000
 #define  SDHCI_DATA_LVL_MASK	0x00F00000
 #define   SDHCI_DATA_LVL_SHIFT	20
-#define   SDHCI_DATA_0_LVL_MASK	0x00100000
 
 #define SDHCI_HOST_CONTROL	0x28
 #define  SDHCI_CTRL_LED		0x01
@@ -206,8 +205,6 @@
 #define  SDHCI_DRIVER_TYPE_D	0x00000040
 #define  SDHCI_RETUNING_TIMER_COUNT_MASK	0x00000F00
 #define  SDHCI_RETUNING_TIMER_COUNT_SHIFT	8
-#define  SDHCI_MAX_TUNING_TIMER			0xb
-#define  SDHCI_OTHER_TUNING_SOURCE		0xf
 #define  SDHCI_USE_SDR50_TUNING			0x00002000
 #define  SDHCI_RETUNING_MODE_MASK		0x0000C000
 #define  SDHCI_RETUNING_MODE_SHIFT		14
@@ -276,6 +273,9 @@
 #define SDHCI_DEFAULT_BOUNDARY_SIZE  (512 * 1024)
 #define SDHCI_DEFAULT_BOUNDARY_ARG   (ilog2(SDHCI_DEFAULT_BOUNDARY_SIZE) - 12)
 
+/* Max timeout timer value for each sdhci request */
+#define SDHCI_REQ_TIMEOUT_TIMER_CNT_MAX 10
+
 struct sdhci_ops {
 #ifdef CONFIG_MMC_SDHCI_IO_ACCESSORS
 	u32		(*read_l)(struct sdhci_host *host, int reg);
@@ -312,6 +312,7 @@ struct sdhci_ops {
 	int	(*gpio_buf_check)(struct sdhci_host *host, unsigned int clk);
 	int	(*gpio_buf_dump)(struct sdhci_host *host);
 	int	(*set_io_voltage)(struct sdhci_host *, bool);
+	int	(*get_timeout_timer_count)(struct sdhci_host *host);
 };
 
 #ifdef CONFIG_MMC_SDHCI_IO_ACCESSORS

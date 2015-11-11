@@ -69,13 +69,6 @@ enum sst_drv_status {
 	SST_PLATFORM_DROPPED,
 };
 
-enum ssp_port {
-	SST_SSP_PORT0 = 0,
-	SST_SSP_PORT1,
-	SST_SSP_PORT2,
-	SST_SSP_PORT3,
-};
-
 #define SST_PIPE_CONTROL	0x0
 #define SST_COMPRESS_VOL	0x01
 
@@ -83,8 +76,6 @@ int sst_platform_clv_init(struct snd_soc_platform *platform);
 int sst_dsp_init(struct snd_soc_platform *platform);
 int sst_dsp_init_v2_dpcm(struct snd_soc_platform *platform);
 int sst_send_pipe_gains(struct snd_soc_dai *dai, int stream, int mute);
-void send_ssp_cmd(struct snd_soc_platform *platform, const char *id, bool enable);
-void sst_handle_vb_timer(struct snd_soc_platform *platform, bool enable);
 
 unsigned int sst_soc_read(struct snd_soc_platform *platform, unsigned int reg);
 int sst_soc_write(struct snd_soc_platform *platform, unsigned int reg, unsigned int val);
@@ -119,15 +110,6 @@ struct sst_lowlatency_deepbuff {
 	unsigned long	*deep_buffer;
 	unsigned long	period_time;
 };
-
-struct sst_pcm_format {
-	unsigned int sample_bits;
-	unsigned int rate_min;
-	unsigned int rate_max;
-	unsigned int channels_min;
-	unsigned int channels_max;
-};
-
 
 struct sst_data {
 	struct platform_device *pdev;

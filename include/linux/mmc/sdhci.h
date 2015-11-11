@@ -232,6 +232,8 @@ struct sdhci_host {
 	unsigned int            gpio_pwr_en;
 	unsigned int            gpio_1p8_en;
 
+	unsigned int		timeout_timer_cnt; /* Timeout timer count */
+
 	unsigned long private[0] ____cacheline_aligned;
 };
 #endif /* LINUX_MMC_SDHCI_H */

@@ -36,14 +36,11 @@
 
 #include "psb_intel_reg.h"
 #include "pwr_mgmt.h"
-#include "dc_maxfifo.h"
 
 #include "mdfld_dsi_dbi_dpu.h"
 
 #include "psb_irq.h"
 #include "psb_intel_hdmi.h"
-
-#include "mdfld_dsi_pkg_sender.h"
 
 #define KEEP_UNUSED_CODE 0
 
@@ -52,24 +49,6 @@ extern int drm_psb_smart_vsync;
 /*
  * inline functions
  */
-
-static inline void update_te_counter(struct drm_device *dev, uint32_t pipe)
-{
-	struct mdfld_dsi_pkg_sender *sender;
-	struct mdfld_dsi_dbi_output **dbi_outputs;
-	struct mdfld_dsi_dbi_output *dbi_output;
-	struct drm_psb_private *dev_priv =
-		(struct drm_psb_private *)dev->dev_private;
-	struct mdfld_dbi_dsr_info *dsr_info = dev_priv->dbi_dsr_info;
-
-	if (!dsr_info)
-		return;
-
-	dbi_outputs = dsr_info->dbi_outputs;
-	dbi_output = pipe ? dbi_outputs[1] : dbi_outputs[0];
-	sender = mdfld_dsi_encoder_get_pkg_sender(&dbi_output->base);
-	mdfld_dsi_report_te(sender);
-}
 
 static inline u32 psb_pipestat(int pipe)
 {
@@ -166,14 +145,6 @@ void mid_enable_pipe_event(struct drm_psb_private *dev_priv, int pipe)
 {
 	struct drm_device *dev = dev_priv->dev;
 	u32 pipe_event = mid_pipe_event(pipe);
-	/* S0i1-Display registers can only be programmed after the pipe events
-	 * are disabled. Otherwise MSI from the display controller can reach
-	 * the Punit without SCU knowing about it. We have to prevent this
-	 * scenario. So, if we about to enable the pipe_event, check if the
-	 * we have already entered the S0i1-Display mode. If so clear it
-	 * and set the state back to ready.
-	 */
-	exit_s0i1_display_mode(dev);
 	dev_priv->vdc_irq_mask |= pipe_event;
 	PSB_WVDC32(~dev_priv->vdc_irq_mask, PSB_INT_MASK_R);
 	PSB_WVDC32(dev_priv->vdc_irq_mask, PSB_INT_ENABLE_R);
@@ -187,14 +158,6 @@ void mid_disable_pipe_event(struct drm_psb_private *dev_priv, int pipe)
 		dev_priv->vdc_irq_mask &= ~pipe_event;
 		PSB_WVDC32(~dev_priv->vdc_irq_mask, PSB_INT_MASK_R);
 		PSB_WVDC32(dev_priv->vdc_irq_mask, PSB_INT_ENABLE_R);
-		/* S0i1-Display registers can only be programmed after the pipe events
-		 * are disabled. Otherwise MSI from the display controller can reach
-		 * the Punit without SCU knowing about it. We have to prevent this
-		 * scenario. So, if we are disabling the pipe_event, check if are
-		 * ready to enter S0i1-Display mode. If so clear it
-		 * and set the state back to entered.
-		 */
-		enter_s0i1_display_mode(dev);
 	}
 }
 
@@ -364,59 +327,15 @@ static void mid_pipe_event_handler(struct drm_device *dev, uint32_t pipe)
 	uint32_t pipe_status = dev_priv->pipestat[pipe] >> 16;
 	uint32_t i = 0;
 	unsigned long irq_flags;
-	uint32_t mipi_intr_stat_val = 0;
-	uint32_t mipi_intr_stat_reg = 0;
-	struct mdfld_dsi_config *dsi_config = NULL;
-	struct mdfld_dsi_hw_registers *regs = NULL;
-	struct mdfld_dsi_hw_context *ctx = NULL;
-	u32 val = 0;
 
 	spin_lock_irqsave(&dev_priv->irqmask_lock, irq_flags);
 
-	if (pipe == MDFLD_PIPE_A)
-		mipi_intr_stat_reg = MIPIA_INTR_STAT_REG;
-
-	if ((mipi_intr_stat_reg) && (is_panel_vid_or_cmd(dev) == MDFLD_DSI_ENCODER_DPI)) {
-		mipi_intr_stat_val = PSB_RVDC32(mipi_intr_stat_reg);
-		PSB_WVDC32(mipi_intr_stat_val, mipi_intr_stat_reg);
-		if (mipi_intr_stat_val & DPI_FIFO_UNDER_RUN) {
-			dev_priv->pipea_dpi_underrun_count++;
-			/* ignore the first dpi underrun after dpi panel power on */
-			if (dev_priv->pipea_dpi_underrun_count > 1)
-				DRM_INFO("Display pipe A received a DPI_FIFO_UNDER_RUN event\n");
-		}
-
-		mipi_intr_stat_reg = MIPIA_INTR_STAT_REG + MIPIC_REG_OFFSET;
-
-		mipi_intr_stat_val = PSB_RVDC32(mipi_intr_stat_reg);
-		PSB_WVDC32(mipi_intr_stat_val, mipi_intr_stat_reg);
-		if (mipi_intr_stat_val & DPI_FIFO_UNDER_RUN) {
-			dev_priv->pipec_dpi_underrun_count++;
-			/* ignore the first dpi underrun after dpi panel power on */
-			if (dev_priv->pipec_dpi_underrun_count > 1)
-				DRM_INFO("Display pipe C received a DPI_FIFO_UNDER_RUN event\n");
-		}
-	}
-
 	pipe_stat_val = PSB_RVDC32(pipe_stat_reg);
+
 	/* Sometimes We read 0 from HW - keep reading until we get non-zero */
 	if (!pipe_stat_val) {
 		pipe_stat_val = REG_READ(pipe_stat_reg);
 	}
-#ifdef ENABLE_HW_REPEAT_FRAME
-	/* In the case of the repeated frame count interrupt, we need to disable
-	   the repeat_frame_count_threshold register as otherwise we keep getting
-	   an interrupt
-	*/
-	if ((pipe == MDFLD_PIPE_A) &&
-               (pipe_stat_val & PIPE_REPEATED_FRAME_STATUS)) {
-		PSB_DEBUG_PM("Frame count interrupt Before Clearing "
-				"PipeAStat Reg=0x%8x Val=0x%8x\n",
-			pipe_stat_reg, pipe_stat_val);
-		PSB_WVDC32(PIPEA_REPEAT_FRM_CNT_TRESHOLD_DISABLE,
-				PIPEA_REPEAT_FRM_CNT_TRESHOLD_REG);
-	}
-#endif
 
 	/* clear the 2nd level interrupt status bits */
 	PSB_WVDC32(pipe_stat_val, pipe_stat_reg);
@@ -475,42 +394,14 @@ static void mid_pipe_event_handler(struct drm_device *dev, uint32_t pipe)
 
 	if (pipe_stat_val & PIPE_TE_STATUS) {
 		dev_priv->te_pipe = pipe;
-		update_te_counter(dev, pipe);
 		drm_handle_vblank(dev, pipe);
 		queue_work(dev_priv->vsync_wq, &dev_priv->te_work);
-	}
-
-	if (pipe == drm_psb_set_gamma_pipe && drm_psb_set_gamma_pending) {
-		dsi_config = dev_priv->dsi_configs[pipe];
-		regs = &dsi_config->regs;
-		ctx = &dsi_config->dsi_hw_context;
-
-		for (i = 0; i < 256; i++)
-			REG_WRITE(regs->palette_reg + i*4, gamma_setting_save[i] );
-
-		val = REG_READ(regs->pipeconf_reg);
-		val |= (PIPEACONF_GAMMA);
-		REG_WRITE(regs->pipeconf_reg, val);
-		ctx->pipeconf = val;
-		REG_WRITE(regs->dspcntr_reg, REG_READ(regs->dspcntr_reg) |
-				DISPPLANE_GAMMA_ENABLE);
-		ctx->dspcntr = REG_READ(regs->dspcntr_reg) | DISPPLANE_GAMMA_ENABLE;
-		REG_READ(regs->dspcntr_reg);
-		drm_psb_set_gamma_pending = 0 ;
-		drm_psb_set_gamma_pipe = MDFLD_PIPE_MAX;
 	}
 
 	if (pipe == 0) { /* only for pipe A */
 		if (pipe_stat_val & PIPE_FRAME_DONE_STATUS)
 			wake_up_interruptible(&dev_priv->eof_wait);
 	}
-
-#ifdef ENABLE_HW_REPEAT_FRAME
-	if ((pipe == MDFLD_PIPE_A) &&
-               (pipe_stat_val & PIPE_REPEATED_FRAME_STATUS)) {
-		maxfifo_report_repeat_frame_interrupt(dev);
-	}
-#endif
 
 #ifdef CONFIG_SUPPORT_HDMI
 	if (pipe == 1) { /* HDMI is only on PIPE B */
@@ -826,13 +717,6 @@ void psb_irq_turn_on_dpst(struct drm_device *dev)
 	/* FIXME: revisit the power island when touching the DPST feature. */
 	if (power_island_get(OSPM_DISPLAY_A)) {
 
-		PSB_WVDC32(ctx->histogram_logic_ctrl, HISTOGRAM_LOGIC_CONTROL);
-		PSB_WVDC32(ctx->histogram_intr_ctrl, HISTOGRAM_INT_CONTROL);
-
-		spin_lock_irqsave(&dev_priv->irqmask_lock, irqflags);
-		psb_enable_pipestat(dev_priv, 0, PIPE_DPST_EVENT_ENABLE);
-		spin_unlock_irqrestore(&dev_priv->irqmask_lock, irqflags);
-/*
 		PSB_WVDC32(BIT31, HISTOGRAM_LOGIC_CONTROL);
 		hist_reg = PSB_RVDC32(HISTOGRAM_LOGIC_CONTROL);
 		ctx->histogram_logic_ctrl = hist_reg;
@@ -846,16 +730,20 @@ void psb_irq_turn_on_dpst(struct drm_device *dev)
 			   PWM_PHASEIN_INT_ENABLE, PWM_CONTROL_LOGIC);
 		pwm_reg = PSB_RVDC32(PWM_CONTROL_LOGIC);
 
+		spin_lock_irqsave(&dev_priv->irqmask_lock, irqflags);
+		psb_enable_pipestat(dev_priv, 0, PIPE_DPST_EVENT_ENABLE);
+		spin_unlock_irqrestore(&dev_priv->irqmask_lock, irqflags);
+
 		hist_reg = PSB_RVDC32(HISTOGRAM_INT_CONTROL);
 		PSB_WVDC32(hist_reg | HISTOGRAM_INT_CTRL_CLEAR,
 			   HISTOGRAM_INT_CONTROL);
 		pwm_reg = PSB_RVDC32(PWM_CONTROL_LOGIC);
 		PSB_WVDC32(pwm_reg | 0x80010100 | PWM_PHASEIN_ENABLE,
 			   PWM_CONTROL_LOGIC);
-*/
 
 		power_island_put(OSPM_DISPLAY_A);
 	}
+
 }
 
 int psb_irq_enable_dpst(struct drm_device *dev)
@@ -873,6 +761,8 @@ void psb_irq_turn_off_dpst(struct drm_device *dev)
 	    (struct drm_psb_private *)dev->dev_private;
 	struct mdfld_dsi_config *dsi_config = NULL;
 	unsigned long irqflags;
+	u32 hist_reg;
+	u32 pwm_reg;
 
 	if (!dev_priv)
 		return;
@@ -884,19 +774,17 @@ void psb_irq_turn_off_dpst(struct drm_device *dev)
 	/* FIXME: revisit the power island when touching the DPST feature. */
 	if (power_island_get(OSPM_DISPLAY_A)) {
 
-               PSB_WVDC32(PSB_RVDC32(HISTOGRAM_INT_CONTROL) & 0x7fffffff,
-			HISTOGRAM_INT_CONTROL);
+		PSB_WVDC32(0x00000000, HISTOGRAM_INT_CONTROL);
+		hist_reg = PSB_RVDC32(HISTOGRAM_INT_CONTROL);
 
 		spin_lock_irqsave(&dev_priv->irqmask_lock, irqflags);
 		psb_disable_pipestat(dev_priv, 0, PIPE_DPST_EVENT_ENABLE);
 		spin_unlock_irqrestore(&dev_priv->irqmask_lock, irqflags);
 
-/*
 		pwm_reg = PSB_RVDC32(PWM_CONTROL_LOGIC);
 		PSB_WVDC32(pwm_reg & !(PWM_PHASEIN_INT_ENABLE),
 			   PWM_CONTROL_LOGIC);
 		pwm_reg = PSB_RVDC32(PWM_CONTROL_LOGIC);
-*/
 
 		power_island_put(OSPM_DISPLAY_A);
 	}
@@ -948,8 +836,7 @@ int psb_enable_vblank(struct drm_device *dev, int pipe)
 	reg_val = REG_READ(pipeconf_reg);
 
 	if (!(reg_val & PIPEACONF_ENABLE)) {
-		DRM_ERROR("%s: pipe %d is disabled %#x\n",
-			  __func__, pipe, reg_val);
+		DRM_ERROR("%s: pipe %d is disabled\n", __func__, pipe);
 		return -EINVAL;
 	}
 
@@ -985,8 +872,8 @@ void psb_disable_vblank(struct drm_device *dev, int pipe)
 
 	spin_lock_irqsave(&dev_priv->irqmask_lock, irqflags);
 
-	psb_disable_pipestat(dev_priv, pipe, PIPE_VBLANK_INTERRUPT_ENABLE);
 	mid_disable_pipe_event(dev_priv, pipe);
+	psb_disable_pipestat(dev_priv, pipe, PIPE_VBLANK_INTERRUPT_ENABLE);
 
 	spin_unlock_irqrestore(&dev_priv->irqmask_lock, irqflags);
 	PSB_DEBUG_ENTRY("%s: Disabled VBlank for pipe %d\n", __func__, pipe);
@@ -1028,13 +915,6 @@ u32 psb_get_vblank_counter(struct drm_device *dev, int pipe)
 			  pipe);
 		goto psb_get_vblank_counter_exit;
 	}
-
-	/* we always get 0 reading these two registers on MOFD
-	 * and reading these registers can causes UI freeze
-	 * when connected with HDMI using 640x480p / 720x480p
-	 */
-	if (IS_MOFD(dev))
-		return 0;
 
 	/*
 	 * High & low register fields aren't synchronized, so make sure
@@ -1242,57 +1122,6 @@ void mdfld_disable_te(struct drm_device *dev, int pipe)
 	spin_unlock_irqrestore(&dev_priv->irqmask_lock, irqflags);
 	PSB_DEBUG_ENTRY("%s: Disabled TE for pipe %d\n", __func__, pipe);
 }
-
-#ifdef ENABLE_HW_REPEAT_FRAME
-int mrfl_enable_repeat_frame_intr(struct drm_device *dev, int idle_frame_count)
-{
-	struct drm_psb_private *dev_priv =
-	    (struct drm_psb_private *)dev->dev_private;
-	unsigned long irqflags;
-
-	spin_lock_irqsave(&dev_priv->irqmask_lock, irqflags);
-
-	/* Disable first to restart the count. This is for the
-	 * scenario that we are changing the treshold count and the
-	 * new count is lower than the new count - we don't want
-	 * interrupt immediately
-	 */
-	PSB_WVDC32(PIPEA_CALCULATE_CRC_DISABLE, PIPEA_CALCULATE_CRC_REG);
-	PSB_WVDC32(PIPEA_REPEAT_FRM_CNT_TRESHOLD_DISABLE,
-			PIPEA_REPEAT_FRM_CNT_TRESHOLD_REG);
-	/*Enable the CRC calculation*/
-	PSB_WVDC32(PIPEA_CALCULATE_CRC_ENABLE, PIPEA_CALCULATE_CRC_REG);
-
-	mid_enable_pipe_event(dev_priv, MDFLD_PIPE_A);
-	/*Enable receiving the interrupt through pipestat register*/
-	psb_enable_pipestat(dev_priv, MDFLD_PIPE_A, PIPE_REPEATED_FRAME_ENABLE);
-
-	PSB_WVDC32(PIPEA_REPEAT_FRM_CNT_TRESHOLD_ENABLE | idle_frame_count,
-		PIPEA_REPEAT_FRM_CNT_TRESHOLD_REG);
-
-	spin_unlock_irqrestore(&dev_priv->irqmask_lock, irqflags);
-	PSB_DEBUG_PM("Enabled Repeat Frame Interrupt\n");
-	return 0;
-}
-
-void mrfl_disable_repeat_frame_intr(struct drm_device *dev)
-{
-	struct drm_psb_private *dev_priv =
-	    (struct drm_psb_private *)dev->dev_private;
-	unsigned long irqflags;
-
-	spin_lock_irqsave(&dev_priv->irqmask_lock, irqflags);
-	PSB_WVDC32(PIPEA_CALCULATE_CRC_DISABLE, PIPEA_CALCULATE_CRC_REG);
-	PSB_WVDC32(PIPEA_REPEAT_FRM_CNT_TRESHOLD_DISABLE,
-			PIPEA_REPEAT_FRM_CNT_TRESHOLD_REG);
-	psb_disable_pipestat(dev_priv, MDFLD_PIPE_A, PIPE_REPEATED_FRAME_ENABLE);
-	PSB_WVDC32(PIPEA_CALCULATE_CRC_DISABLE, PIPEA_CALCULATE_CRC_REG);
-
-
-	spin_unlock_irqrestore(&dev_priv->irqmask_lock, irqflags);
-	PSB_DEBUG_PM("Disabled Repeat Frame Interrupt\n");
-}
-#endif
 
 int mid_irq_enable_hdmi_audio(struct drm_device *dev)
 {

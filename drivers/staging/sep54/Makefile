@@ -8,7 +8,3 @@ ifeq ($(CONFIG_COMPAT),y)
 endif
 
 ccflags-y += -DSEP_SUPPORT_SHA=256 -DCONFIG_NOT_COHERENT_CACHE -DSEP_HWK_UNIT_TEST
-
-ifeq ($(CONFIG_PM_RUNTIME),y)
-	ccflags-y += -DSEP_RUNTIME_PM
-endif

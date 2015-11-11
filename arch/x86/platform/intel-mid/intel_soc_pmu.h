@@ -43,6 +43,8 @@
 #include <asm/intel_scu_ipc.h>
 #include <linux/intel_mid_pm.h>
 
+#include "intel_soc_mdfld.h"
+#include "intel_soc_clv.h"
 #include "intel_soc_mrfld.h"
 
 #define MID_PMU_MFLD_DRV_DEV_ID                 0x0828
@@ -136,16 +138,9 @@
 enum sys_state {
 	SYS_STATE_S0I0,
 	SYS_STATE_S0I1,
-	SYS_STATE_S0I1_LPMP3,
-	SYS_STATE_S0I1_PSH,
-	SYS_STATE_S0I1_DISP,
-	SYS_STATE_S0I1_LPMP3_PSH,
-	SYS_STATE_S0I1_LPMP3_DISP,
-	SYS_STATE_S0I1_PSH_DISP,
-	SYS_STATE_S0I1_LPMP3_PSH_DISP,
+	SYS_STATE_LPMP3,
 	SYS_STATE_S0I2,
 	SYS_STATE_S0I3,
-	SYS_STATE_S0I3_PSH_RET,
 	SYS_STATE_S3,
 	SYS_STATE_S5,
 	SYS_STATE_MAX
@@ -174,22 +169,6 @@ enum pmu_ss_state {
 	SS_STATE_D0I1 = 1,
 	SS_STATE_D0I2 = 2,
 	SS_STATE_D0I3 = 3
-};
-
-enum pmu_mrfl_nc_device_name {
-	GFXSLC = 0,
-	GSDKCK,
-	GRSCD,
-	VED,
-	VEC,
-	DPA,
-	DPB,
-	DPC,
-	VSP,
-	ISP,
-	MIO,
-	HDMIO,
-	GFXSLCLDO
 };
 
 
@@ -340,14 +319,6 @@ struct mid_pmu_dev {
 	u32 __iomem *emergency_emmc_up_addr;
 	u64 pmu_init_time;
 
-	u32 d0i0_count[MAX_LSS_POSSIBLE];
-	u64 d0i0_prev_time[MAX_LSS_POSSIBLE];
-	u64 d0i0_time[MAX_LSS_POSSIBLE];
-
-	u32 nc_d0i0_count[OSPM_MAX_POWER_ISLANDS];
-	u64 nc_d0i0_time[OSPM_MAX_POWER_ISLANDS];
-	u64 nc_d0i0_prev_time[OSPM_MAX_POWER_ISLANDS];
-
 	int cmd_error_int;
 	int s0ix_possible;
 	int s0ix_entered;
@@ -398,7 +369,6 @@ struct platform_pmu_ops {
 	pci_power_t (*pci_choose_state) (int);
 	void (*set_power_state_ops) (int);
 	void (*set_s0ix_complete) (void);
-	void (*set_s0i1_disp_vote) (bool);
 	int (*nc_set_power_state) (int, int, int, int *);
 	bool (*check_nc_sc_status) (void);
 };
@@ -532,11 +502,4 @@ static inline bool nc_device_state(void)
 	return !mid_pmu_cxt->display_off || !mid_pmu_cxt->camera_off;
 }
 
-#ifdef CONFIG_X86_INTEL_OSC_CLK
-extern int ccu_osc_clk_init(void __iomem *ccubase);
-extern int ccu_osc_clk_uninit(void);
-#else
-static inline int ccu_osc_clk_init(void __iomem *ccubase) {return 0; }
-static inline int ccu_osc_clk_uninit(void) {return 0; }
-#endif /* CONFIG_X86_INTEL_OSC_CLK */
 #endif

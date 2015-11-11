@@ -49,7 +49,6 @@
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/of.h>
-#include <linux/pci.h>
 
 #include <linux/usb/otg.h>
 #include <linux/usb/ch9.h>
@@ -59,7 +58,6 @@
 #include "core.h"
 #include "gadget.h"
 #include "io.h"
-#include "otg.h"
 
 #include "debug.h"
 

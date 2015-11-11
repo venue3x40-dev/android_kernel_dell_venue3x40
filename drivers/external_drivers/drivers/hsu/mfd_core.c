@@ -556,18 +556,18 @@ static int hsu_debugfs_init(struct hsu_port *hsu)
 
 	for (i = 0; i < 3; i++) {
 		snprintf(name, sizeof(name), "port_%d_regs", i);
-		debugfs_create_file(name, S_IRUSR,
+		debugfs_create_file(name, S_IFREG | S_IRUGO,
 			hsu->debugfs, (void *)(&hsu->port[i]), &port_regs_ops);
 	}
 
 	for (i = 0; i < 6; i++) {
 		snprintf(name, sizeof(name), "dma_chan_%d_regs", i);
-		debugfs_create_file(name, S_IRUSR,
+		debugfs_create_file(name, S_IFREG | S_IRUGO,
 			hsu->debugfs, (void *)&hsu->chans[i], &dma_regs_ops);
 	}
 
 	snprintf(name, sizeof(name), "dump_status");
-	debugfs_create_file(name, S_IRUSR,
+	debugfs_create_file(name, S_IFREG | S_IRUGO,
 		hsu->debugfs, NULL, &hsu_dump_ops);
 
 	return 0;
@@ -1059,8 +1059,6 @@ static unsigned int serial_hsu_get_mctrl(struct uart_port *port)
 static void set_mctrl(struct uart_hsu_port *up, unsigned int mctrl)
 {
 	trace_hsu_func_start(up->index, __func__);
-	up->mcr &= ~(UART_MCR_RTS | UART_MCR_DTR | UART_MCR_OUT1 |
-		     UART_MCR_OUT2 | UART_MCR_LOOP);
 	if (mctrl & TIOCM_RTS)
 		up->mcr |= UART_MCR_RTS;
 	if (mctrl & TIOCM_DTR)
@@ -1083,8 +1081,6 @@ static void serial_hsu_set_mctrl(struct uart_port *port, unsigned int mctrl)
 		container_of(port, struct uart_hsu_port, port);
 
 	trace_hsu_func_start(up->index, __func__);
-	up->mcr &= ~(UART_MCR_RTS | UART_MCR_DTR | UART_MCR_OUT1 |
-		     UART_MCR_OUT2 | UART_MCR_LOOP);
 	if (mctrl & TIOCM_RTS)
 		up->mcr |= UART_MCR_RTS;
 	if (mctrl & TIOCM_DTR)
@@ -1529,7 +1525,7 @@ serial_hsu_set_termios(struct uart_port *port, struct ktermios *termios,
 	 * MSI by default
 	 */
 	up->ier &= ~UART_IER_MSI;
-	if (!cfg->hw_ctrl_cts && UART_ENABLE_MS(&up->port, termios->c_cflag))
+	if (UART_ENABLE_MS(&up->port, termios->c_cflag))
 		up->ier |= UART_IER_MSI;
 
 	serial_out(up, UART_IER, up->ier);

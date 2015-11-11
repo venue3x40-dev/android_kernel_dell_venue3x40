@@ -10,6 +10,17 @@ config GPIO_INTEL_MSIC
 	  Say Y here to support GPIO via the SCU IPC interface
 	  on Intel MID platforms.
 
+config INTEL_MID_OSNIB_ILB
+        tristate "cmos osnib driver for Intel BYT platforms"
+	depends on INTEL_REBOOT_TARGET && INTEL_MID_OSIP
+        default n
+        ---help---
+			This driver adds OSNIB support using CMOS.
+			OSNIB is used to share flags between firmware and kernel.
+			This is only valid when no SCU is present.
+
+			If unsure, say N.
+
 config INTEL_MID_OSIP
 	tristate "osip driver for Intel MID platforms"
 	default y
@@ -53,3 +64,9 @@ config INTEL_REBOOT_TARGET
 	---help---
 	  This driver provides a generic implementation for reboot target setting at
 	  reset time.
+
+config INTEL_REBOOT_TARGET_UEFI
+	tristate "Intel Target Mode UEFI implementation"
+	depends on INTEL_REBOOT_TARGET && EFI && !MID_OSNIB_ILB
+	---help---
+	  Reboot Target UEFI based implementation

@@ -39,7 +39,6 @@
 #include <sound/soc.h>
 #include <sound/jack.h>
 #include <linux/input.h>
-#include <asm/intel-mid.h>
 
 #include <linux/mfd/wm8994/core.h>
 #include <linux/mfd/wm8994/registers.h>
@@ -341,10 +340,6 @@ static int mrfld_8958_set_vflex_vsel(struct snd_soc_dapm_widget *w,
 	pr_debug("pmic_id %#x vflexvsel %#x\n", pmic_id,
 		SND_SOC_DAPM_EVENT_ON(event) ? VFLEXVSEL_5V : vflexvsel);
 
-	/*FIXME: seems to be issue with bypass mode in MOOR, for now
-		force the bias off volate as VFLEXVSEL_5V */
-	vflexvsel = VFLEXVSEL_5V;
-
 	if (SND_SOC_DAPM_EVENT_ON(event))
 		retval = intel_scu_ipc_iowrite8(VFLEXCNT, VFLEXVSEL_5V);
 	else if (SND_SOC_DAPM_EVENT_OFF(event))
@@ -384,18 +379,10 @@ static const struct snd_soc_dapm_route map[] = {
 	{ "IN1LP", NULL, "AMIC" },
 
 	/* SWM map link the SWM outs to codec AIF */
-	{ "AIF1 Playback", NULL, "ssp2 Tx"},
-	{ "ssp2 Tx", NULL, "codec_out0"},
-	{ "ssp2 Tx", NULL, "codec_out1"},
-	{ "codec_in0", NULL, "ssp2 Rx" },
-	{ "codec_in1", NULL, "ssp2 Rx" },
-	{ "ssp2 Rx", NULL, "AIF1 Capture"},
-
-	{ "ssp0 Tx", NULL, "modem_out"},
-	{ "modem_in", NULL, "ssp0 Rx" },
-
-	{ "ssp1 Tx", NULL, "bt_fm_out"},
-	{ "bt_fm_in", NULL, "ssp1 Rx" },
+	{ "AIF1 Playback", NULL, "codec_out0"  },
+	{ "AIF1 Playback", NULL, "codec_out1"  },
+	{ "codec_in0", NULL, "AIF1 Capture" },
+	{ "codec_in1", NULL, "AIF1 Capture" },
 
 	{ "AIF1 Playback", NULL, "VFLEXCNT" },
 	{ "AIF1 Capture", NULL, "VFLEXCNT" },
@@ -485,7 +472,6 @@ static void wm8958_custom_mic_id(void *data, u16 status)
 
 		wm8994->mic_detecting = false;
 		wm8994->jack_mic = true;
-		wm8994->headphone_detected = false;
 
 		snd_soc_jack_report(wm8994->micdet[0].jack, SND_JACK_HEADSET,
 				    SND_JACK_HEADSET);
@@ -501,8 +487,6 @@ static void wm8958_custom_mic_id(void *data, u16 status)
 		 * or headset is detected)
 		 * */
 		wm8994->mic_detecting = true;
-		wm8994->jack_mic = false;
-		wm8994->headphone_detected = true;
 
 		snd_soc_jack_report(wm8994->micdet[0].jack, SND_JACK_HEADPHONE,
 				    SND_JACK_HEADSET);
@@ -555,8 +539,6 @@ static int mrfld_8958_init(struct snd_soc_pcm_runtime *runtime)
 	snd_soc_dapm_nc_pin(&card->dapm, "IN1RN");
 	snd_soc_dapm_nc_pin(&card->dapm, "IN1RP");
 
-	/* Force enable VMID to avoid cold latency constraints */
-	snd_soc_dapm_force_enable_pin(&card->dapm, "VMID");
 	snd_soc_dapm_sync(&card->dapm);
 
 	codec = mrfld_8958_get_codec(card);
@@ -577,9 +559,6 @@ static int mrfld_8958_init(struct snd_soc_pcm_runtime *runtime)
 
 	snd_jack_set_key(ctx->jack.jack, SND_JACK_BTN_1, KEY_MEDIA);
 	snd_jack_set_key(ctx->jack.jack, SND_JACK_BTN_0, KEY_MEDIA);
-
-	snd_soc_update_bits(codec, WM8958_MICBIAS2, WM8958_MICB2_LVL_MASK,
-				WM8958_MICB2_LVL_2P6V << WM8958_MICB2_LVL_SHIFT);
 
 	wm8958_mic_detect(codec, &ctx->jack, NULL, NULL,
 			  wm8958_custom_mic_id, codec);
@@ -717,41 +696,19 @@ struct snd_soc_dai_link mrfld_8958_msic_dailink[] = {
 	{
 		.name = "Merrifield Codec-Loop Port",
 		.stream_name = "Saltbay Codec-Loop",
-		.cpu_dai_name = "ssp2-port",
-		.platform_name = "sst-platform",
+		.cpu_dai_name = "snd-soc-dummy-dai",
 		.codec_dai_name = "wm8994-aif1",
 		.codec_name = "wm8994-codec",
 		.dai_fmt = SND_SOC_DAIFMT_DSP_B | SND_SOC_DAIFMT_IB_NF
 						| SND_SOC_DAIFMT_CBS_CFS,
 		.params = &mrfld_wm8958_dai_params,
-		.dsp_loopback = true,
-	},
-	{
-		.name = "Merrifield Modem-Loop Port",
-		.stream_name = "Saltbay Modem-Loop",
-		.cpu_dai_name = "ssp0-port",
-		.platform_name = "sst-platform",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.params = &mrfld_wm8958_dai_params,
-		.dsp_loopback = true,
-	},
-	{
-		.name = "Merrifield BTFM-Loop Port",
-		.stream_name = "Saltbay BTFM-Loop",
-		.cpu_dai_name = "ssp1-port",
-		.platform_name = "sst-platform",
-		.codec_dai_name = "snd-soc-dummy-dai",
-		.codec_name = "snd-soc-dummy",
-		.params = &mrfld_wm8958_dai_params,
-		.dsp_loopback = true,
 	},
 
 	/* back ends */
 	{
 		.name = "SSP2-Codec",
 		.be_id = 1,
-		.cpu_dai_name = "ssp2-port",
+		.cpu_dai_name = "ssp2-codec",
 		.platform_name = "sst-platform",
 		.no_pcm = 1,
 		.codec_dai_name = "wm8994-aif1",
@@ -785,48 +742,14 @@ struct snd_soc_dai_link mrfld_8958_msic_dailink[] = {
 #ifdef CONFIG_PM_SLEEP
 static int snd_mrfld_8958_prepare(struct device *dev)
 {
-	struct snd_soc_card *card = dev_get_drvdata(dev);
-	struct snd_soc_codec *codec;
-	struct snd_soc_dapm_context *dapm;
-
-	pr_debug("In %s\n", __func__);
-
-	codec = mrfld_8958_get_codec(card);
-	if (!codec) {
-		pr_err("%s: couldn't find the codec pointer!\n", __func__);
-		return -EAGAIN;
-	}
-
-	pr_debug("found codec %s\n", codec->name);
-	dapm = &codec->dapm;
-
-	snd_soc_dapm_disable_pin(dapm, "VMID");
-	snd_soc_dapm_sync(dapm);
-
+	pr_debug("In %s device name\n", __func__);
 	snd_soc_suspend(dev);
 	return 0;
 }
 
 static void snd_mrfld_8958_complete(struct device *dev)
 {
-	struct snd_soc_card *card = dev_get_drvdata(dev);
-	struct snd_soc_codec *codec;
-	struct snd_soc_dapm_context *dapm;
-
 	pr_debug("In %s\n", __func__);
-
-	codec = mrfld_8958_get_codec(card);
-	if (!codec) {
-		pr_err("%s: couldn't find the codec pointer!\n", __func__);
-		return;
-	}
-
-	pr_debug("found codec %s\n", codec->name);
-	dapm = &codec->dapm;
-
-	snd_soc_dapm_force_enable_pin(dapm, "VMID");
-	snd_soc_dapm_sync(dapm);
-
 	snd_soc_resume(dev);
 	return;
 }

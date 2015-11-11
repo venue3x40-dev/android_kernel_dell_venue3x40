@@ -42,7 +42,6 @@
 #include <linux/pm_qos.h>
 #include <linux/pm_runtime.h>
 #include <linux/completion.h>
-#include <linux/acpi.h>
 #include <asm/intel-mid.h>
 
 #include <linux/spi/spi.h>
@@ -809,6 +808,11 @@ static void poll_transfer(unsigned long data)
 
 	bool delay = false;
 
+	if ((intel_mid_identify_sim() == INTEL_MID_CPU_SIMULATION_VP) ||
+	     intel_mid_identify_sim() == INTEL_MID_CPU_SIMULATION_HVP) {
+		delay = true;
+	}
+
 	if (sspc->tx)
 		while (sspc->tx != sspc->tx_end) {
 			/* [REVERT ME] Tangier simulator requires a delay */
@@ -989,7 +993,14 @@ static int handle_message(struct ssp_drv_context *sspc)
 	sspc->tx_end = sspc->tx + transfer->len;
 	sspc->rx_end = sspc->rx + transfer->len;
 
-	write_SSSR(sspc->clear_sr, reg);
+	/* [REVERT ME] Bug in status register clear for Tangier simulation */
+	if ((intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_TANGIER) ||
+	    (intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_ANNIEDALE)) {
+		if ((intel_mid_identify_sim() != INTEL_MID_CPU_SIMULATION_VP &&
+		    (intel_mid_identify_sim() != INTEL_MID_CPU_SIMULATION_HVP)))
+			write_SSSR(sspc->clear_sr, reg);
+	} else /* Clear status  */
+		write_SSSR(sspc->clear_sr, reg);
 
 	/* setup the CR1 control register */
 	cr1 = chip->cr1 | sspc->cr1_sig;
@@ -1015,7 +1026,8 @@ static int handle_message(struct ssp_drv_context *sspc)
 		sspc->len, sspc->n_bytes, chip->cr0, cr1);
 
 	/* first set CR1 */
-	write_SSCR1(cr1, reg);
+	if (intel_mid_identify_sim() != INTEL_MID_CPU_SIMULATION_SLE)
+		write_SSCR1(cr1, reg);
 
 	if ((intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_TANGIER) ||
 		(intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_ANNIEDALE))
@@ -1032,19 +1044,21 @@ static int handle_message(struct ssp_drv_context *sspc)
 			start_bitbanging(sspc);
 	} else {
 		/* (re)start the SSP */
-		if (ssp_timing_wr) {
-			dev_dbg(dev, "original cr0 before reset:%x",
-				chip->cr0);
-			/*we should not disable TUM and RIM interrup*/
-			write_SSCR0(0x0000000F, reg);
-			chip->cr0 &= ~(SSCR0_SSE);
-			dev_dbg(dev, "reset ssp:cr0:%x", chip->cr0);
-			write_SSCR0(chip->cr0, reg);
-			chip->cr0 |= SSCR0_SSE;
-			dev_dbg(dev, "reset ssp:cr0:%x", chip->cr0);
-			write_SSCR0(chip->cr0, reg);
-		} else
-			write_SSCR0(chip->cr0, reg);
+		if (intel_mid_identify_sim() != INTEL_MID_CPU_SIMULATION_SLE) {
+			if (ssp_timing_wr) {
+				dev_dbg(dev, "original cr0 before reset:%x",
+					chip->cr0);
+				/*we should not disable TUM and RIM interrup*/
+				write_SSCR0(0x0000000F, reg);
+				chip->cr0 &= ~(SSCR0_SSE);
+				dev_dbg(dev, "reset ssp:cr0:%x", chip->cr0);
+				write_SSCR0(chip->cr0, reg);
+				chip->cr0 |= SSCR0_SSE;
+				dev_dbg(dev, "reset ssp:cr0:%x", chip->cr0);
+				write_SSCR0(chip->cr0, reg);
+			} else
+				write_SSCR0(chip->cr0, reg);
+		}
 	}
 
 	if (sspc->cs_control)
@@ -1377,8 +1391,18 @@ static int intel_mid_ssp_spi_probe(struct pci_dev *pdev,
 
 	if ((intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_TANGIER) ||
 		(intel_mid_identify_cpu() == INTEL_MID_CPU_CHIP_ANNIEDALE)) {
-		disable_irq_nosync(sspc->irq);
-		ssp_timing_wr = 1;
+		if ((intel_mid_identify_sim() ==
+				INTEL_MID_CPU_SIMULATION_SLE) ||
+		    (intel_mid_identify_sim() ==
+				INTEL_MID_CPU_SIMULATION_NONE)) {
+			/* [REVERT ME] Tangier SLE not supported.
+			 * Requires debug before removal.  Assume
+			 * also required in Si. */
+			disable_irq_nosync(sspc->irq);
+		}
+		if ((intel_mid_identify_sim() == INTEL_MID_CPU_SIMULATION_NONE) ||
+		    (intel_mid_identify_sim() == INTEL_MID_CPU_SIMULATION_SLE))
+			ssp_timing_wr = 1;
 	}
 
 	if (status < 0) {
@@ -1482,21 +1506,6 @@ static void intel_mid_ssp_spi_remove(struct pci_dev *pdev)
 	pci_disable_device(pdev);
 
 	return;
-}
-
-static int intel_mid_ssp_spi_plat_probe(struct platform_device *pdev)
-{
-	pm_runtime_set_active(&pdev->dev);
-	pm_runtime_enable(&pdev->dev);
-	pm_runtime_allow(&pdev->dev);
-
-	return 0;
-}
-
-static int intel_mid_ssp_spi_plat_remove(struct platform_device *pdev)
-{
-	pm_runtime_forbid(&pdev->dev);
-	return 0;
 }
 
 #ifdef CONFIG_PM
@@ -1604,12 +1613,6 @@ static const struct dev_pm_ops intel_mid_ssp_spi_pm_ops = {
 	.runtime_idle = intel_mid_ssp_spi_runtime_idle,
 };
 
-static const struct dev_pm_ops intel_mid_ssp_spi_plat_pm_ops = {
-	.runtime_suspend = intel_mid_ssp_spi_runtime_suspend,
-	.runtime_resume = intel_mid_ssp_spi_runtime_resume,
-	.runtime_idle = intel_mid_ssp_spi_runtime_idle,
-};
-
 static struct pci_driver intel_mid_ssp_spi_driver = {
 	.name =		DRIVER_NAME,
 	.id_table =	pci_ids,
@@ -1617,29 +1620,6 @@ static struct pci_driver intel_mid_ssp_spi_driver = {
 	.remove =	intel_mid_ssp_spi_remove,
 	.driver =	{
 		.pm	= &intel_mid_ssp_spi_pm_ops,
-	},
-};
-
-#ifdef CONFIG_ACPI
-static const struct acpi_device_id intel_mid_ssp_spi_acpi_ids[] = {
-	{ "8086228E", 0},
-	{ }
-};
-MODULE_DEVICE_TABLE(acpi, intel_mid_ssp_spi_acpi_ids);
-#endif
-
-static struct platform_driver intel_mid_ssp_spi_plat_driver = {
-	.remove		= intel_mid_ssp_spi_plat_remove,
-	.driver		= {
-		.name	= DRIVER_NAME,
-		.owner	= THIS_MODULE,
-/* Disable PM only when kgdb(poll mode uart) is enabled */
-#if defined(CONFIG_PM) && !defined(CONFIG_CONSOLE_POLL)
-		.pm     = &intel_mid_ssp_spi_plat_pm_ops,
-#endif
-#ifdef CONFIG_ACPI
-		.acpi_match_table = ACPI_PTR(intel_mid_ssp_spi_acpi_ids),
-#endif
 	},
 };
 
@@ -1656,17 +1636,3 @@ static void __exit intel_mid_ssp_spi_exit(void)
 }
 
 module_exit(intel_mid_ssp_spi_exit);
-
-static int __init intel_mid_ssp_spi_plat_init(void)
-{
-	return platform_driver_probe(&intel_mid_ssp_spi_plat_driver, intel_mid_ssp_spi_plat_probe);
-}
-
-late_initcall(intel_mid_ssp_spi_plat_init);
-
-static void __exit intel_mid_ssp_spi_plat_exit(void)
-{
-	platform_driver_unregister(&intel_mid_ssp_spi_plat_driver);
-}
-
-module_exit(intel_mid_ssp_spi_plat_exit);

@@ -31,6 +31,8 @@
 #include <linux/mfd/wm8994/pdata.h>
 #include <linux/mfd/wm8994/registers.h>
 
+#include <linux/intel_mid_hwid.h>
+
 #include "wm8994.h"
 
 /**
@@ -638,7 +640,13 @@ static int wm8994_device_init(struct wm8994 *wm8994, int irq)
 		regmap_config = &wm8994_regmap_config;
 		break;
 	case WM8958:
-		regmap_config = &wm8958_regmap_config;
+	//add by fjz 
+		if((intel_mid_get_board_id() & HW_BOARD_7_LTE) || (intel_mid_get_board_id() & HW_BOARD_7_WIFI)){
+			regmap_config = &wm8958_regmap_config;
+		} else {
+			regmap_config = &wm8958_8inch_regmap_config;
+		}
+	//end		
 		break;
 	default:
 		dev_err(wm8994->dev, "Unknown device type %d\n", wm8994->type);
@@ -691,7 +699,7 @@ static int wm8994_device_init(struct wm8994 *wm8994, int irq)
 	 * in operation and are then disabled.
 	 */
 	for (i = 0; i < WM8994_NUM_LDO_REGS; i++) {
-		if (wm8994_ldo_in_use(pdata, i))
+		if (wm8994_ldo_in_use(pdata, i))//set ldo dischg mode ,remark by fjz  20140506
 			wm8994_set_bits(wm8994, WM8994_LDO_1 + i,
 					WM8994_LDO1_DISCH, WM8994_LDO1_DISCH);
 		else

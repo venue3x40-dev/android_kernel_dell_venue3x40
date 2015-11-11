@@ -523,7 +523,7 @@ otm_hdmi_ret_t otm_hdmi_get_eld(void *ctx, otm_hdmi_eld_t *eld)
 		WARN_ON(edid_int->short_audio_descriptor_count >
 						sizeof(eld->mn_sand_sads));
 		memcpy(eld->mn_sand_sads, edid_int->short_audio_descriptor_data,
-		       min_t(int, MAX_DATA_BLOCK_SIZE,
+		       min_t(int, sizeof(eld->mn_sand_sads),
 			     3 * edid_int->short_audio_descriptor_count));
 	}
 
@@ -875,11 +875,12 @@ bool otm_hdmi_power_rails_off(void)
 }
 
 /* turn HDMI power islands on */
-bool otm_hdmi_power_islands_on(void)
+bool otm_hdmi_power_islands_on()
 {
 	hdmi_context_t *ctx = g_context;
+	
 
-	if (ctx && ctx->islands_powered_on == false) {
+	if (ctx->islands_powered_on == false) {
 		ctx->islands_powered_on = true;
 		return ps_hdmi_power_islands_on();
 	}
@@ -887,11 +888,11 @@ bool otm_hdmi_power_islands_on(void)
 }
 
 /* turn HDMI power islands off */
-void otm_hdmi_power_islands_off(void)
+void otm_hdmi_power_islands_off()
 {
 	hdmi_context_t *ctx = g_context;
 
-	if (ctx && ctx->islands_powered_on == true) {
+	if (ctx->islands_powered_on == true) {
 		ctx->islands_powered_on = false;
 		ps_hdmi_power_islands_off();
 	}

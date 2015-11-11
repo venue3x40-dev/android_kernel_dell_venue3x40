@@ -108,17 +108,18 @@ $(DRIVER_NAME)-objs += \
 	$(DISPLAYDIR)/jdi_cmd.o \
 	$(DISPLAYDIR)/cmi_vid.o \
 	$(DISPLAYDIR)/cmi_cmd.o \
-	$(DISPLAYDIR)/sharp10x19_cmd.o \
+	$(DISPLAYDIR)/sharp5_cmd.o \
+	$(DISPLAYDIR)/cpt_80x128_vid_7inch_lcd.o \
+	$(DISPLAYDIR)/auo_80x128_vid_7inch_lcd.o \
+	$(DISPLAYDIR)/auo_80x128_vid_8inch_lcd.o \
+	$(DISPLAYDIR)/ino_12x192_vid_8inch_lcd.o \
+	$(DISPLAYDIR)/auo_12x192_vid_8inch_lcd.o \
 	$(DISPLAYDIR)/sharp25x16_vid.o \
 	$(DISPLAYDIR)/sharp25x16_cmd.o \
-	$(DISPLAYDIR)/sdc16x25_8_cmd.o \
-	$(DISPLAYDIR)/sdc25x16_cmd.o \
 	$(DISPLAYDIR)/jdi25x16_vid.o \
-	$(DISPLAYDIR)/jdi25x16_cmd.o \
 	$(DISPLAYDIR)/ospm/pwr_mgmt.o \
 	$(DISPLAYDIR)/ospm/gfx_rtpm.o \
 	$(DISPLAYDIR)/ospm/dc_ospm.o \
-	$(DISPLAYDIR)/ospm/dc_maxfifo.o \
 	$(DISPLAYDIR)/ospm/video_ospm.o \
 	$(DISPLAYDIR)/ospm/early_suspend.o \
 	$(DISPLAYDIR)/ospm/early_suspend_sysfs.o
@@ -155,22 +156,13 @@ $(DRIVER_NAME)-objs += \
 $(DRIVER_NAME)-objs += \
 	$(OTM_HDMI_SRC)/ipil/specific/mfld/ips_hdmi.o \
 	$(OTM_HDMI_SRC)/ipil/specific/mrfld/ips_hdcp.o \
-	$(OTM_HDMI_SRC)/ipil/specific/mrfld/ips_hdmi_priv.o
-
-ifeq ($(CONFIG_MOOREFIELD),y)
-$(DRIVER_NAME)-objs += \
-	$(OTM_HDMI_SRC)/pil/specific/mofd/ps_hdmi.o
-else
-$(DRIVER_NAME)-objs += \
+	$(OTM_HDMI_SRC)/ipil/specific/mrfld/ips_hdmi_priv.o \
 	$(OTM_HDMI_SRC)/pil/specific/mrfld/ps_hdmi.o
-endif
-
 endif
 
 $(DRIVER_NAME)-objs += \
 	$(VIDEO_COMMON_DIR)/psb_ttm_glue.o \
 	$(VIDEO_COMMON_DIR)/psb_cmdbuf.o \
-	$(VIDEO_COMMON_DIR)/tng_securefw.o \
 	$(VIDEO_COMMON_DIR)/psb_buffer.o \
 	$(VIDEO_COMMON_DIR)/psb_fence.o \
 	$(VIDEO_COMMON_DIR)/psb_mmu.o \

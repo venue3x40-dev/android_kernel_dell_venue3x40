@@ -88,8 +88,6 @@ struct cmd_resp {
 
 #define IA_NOTIFY_SUSPEND ((u8)0x1)
 #define IA_NOTIFY_RESUME  ((u8)0x2)
-#define IA_NOTIFY_TIMESTAMP_SYNC ((u8)0x3)
-typedef s64 timestamp_t;
 struct cmd_ia_notify_param {
 	u8 id;
 	char extra[0];

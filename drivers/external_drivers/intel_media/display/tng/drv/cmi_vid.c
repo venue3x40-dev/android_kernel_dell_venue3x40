@@ -514,7 +514,7 @@ static int mdfld_dsi_cmi_set_brightness(struct mdfld_dsi_config *dsi_config,
 		return -EINVAL;
 	}
 
-	duty_val = (255 * level) / 255;
+	duty_val = (255 * level) / 100;
 
 	mdfld_dsi_send_mcs_short_hs(sender, 0x51, duty_val, 1, 0);
 	wait_timeout = jiffies + (HZ / 100);

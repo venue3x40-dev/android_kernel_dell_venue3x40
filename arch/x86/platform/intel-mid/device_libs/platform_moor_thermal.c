@@ -21,44 +21,57 @@
 #include <asm/intel_mid_remoteproc.h>
 #include "platform_moor_thermal.h"
 
+/* 'enum' of Thermal ADC channels */
+enum thermal_adc_channels { SYS0, SYS1, SYS2, PMIC_DIE };
+
+static int linear_temp_correlation(void *info, long temp, long *res)
+{
+	struct intel_mid_thermal_sensor *sensor = info;
+
+	*res = ((temp * sensor->slope) / 1000) + sensor->intercept;
+
+	return 0;
+}
+
 /*
  * Naming convention:
  * skin0 -> front skin,
  * skin1--> back skin
  */
-/* Updated slope and intercept values as per received from
- * Thermal HW Team. Updated the same value for skin0.
- * Updated the best match slope and intercept values
- * for skin1 same as merrifield platform. */
+/* TODO: Update slope and intercept values as per HW Team.
+ * Currentlry keeping these as default one. */
 static struct intel_mid_thermal_sensor moor_sensors[] = {
 	{
-		.name = "SYSTHERM0",
-		.index = 0,
+		.name = SYSTHERM0,
+		.index = SYS0,
+		.slope = 1000,
+		.intercept = 0,
+		.temp_correlation = linear_temp_correlation,
 		.direct = false,
 	},
 	{
-		.name = "SYSTHERM1",
-		.index = 1,
+		.name = SYSTHERM1,
+		.index = SYS1,
+		.slope = 1000,
+		.intercept = 0,
+		.temp_correlation = linear_temp_correlation,
 		.direct = false,
 	},
 	{
-		.name = "SYSTHERM2",
-		.index = 2,
+		.name = SYSTHERM2,
+		.index = SYS2,
+		.slope = 1000,
+		.intercept = 0,
+		.temp_correlation = linear_temp_correlation,
 		.direct = false,
 	},
 	{
-		.name = "PMIC_DIE",
-		.index = 3,
+		.name = MSIC_DIE_NAME,
+		.index = PMIC_DIE,
+		.slope = 1000,
+		.intercept = 0,
+		.temp_correlation = linear_temp_correlation,
 		.direct = true,
-	},
-	/* Virtual Sensors should always be at the end */
-	{
-		.name = "FrontSkin",
-		.index = 4,
-	},
-	{
-		.name = "BackSkin",
-		.index = 5,
 	},
 };
 
@@ -66,7 +79,6 @@ static struct intel_mid_thermal_platform_data pdata[] = {
 	[moor_thermal] = {
 		.num_sensors = 4,
 		.sensors = moor_sensors,
-		.num_virtual_sensors = 2,
 	},
 };
 

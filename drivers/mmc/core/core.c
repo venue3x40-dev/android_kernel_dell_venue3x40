@@ -2322,6 +2322,18 @@ static int mmc_do_hw_reset(struct mmc_host *host, int check)
 		}
 	}
 
+	/*
+	 * It was observed that some kind of eMMC device may fail to response
+	 * to CMD suddenly during normal usage. And the issue dispeared if
+	 * the same eMMC device working in DDR50. So disabling HS200 and force
+	 * the eMMC device working in DDR50 before reset the eMMC device.
+	 */
+	if ((host->caps2 & MMC_CAP2_HS200_1_8V_SDR) &&
+			(host->caps2 & MMC_CAP2_HS200_DIS)) {
+		pr_warn("%s: disable eMMC HS200\n", __func__);
+		host->caps2 &= ~MMC_CAP2_HS200_1_8V_SDR;
+	}
+
 	if (card && mmc_card_sd(card) &&
 			(card->host->caps2 & MMC_CAP2_FIXED_NCRC) &&
 			(card->scr.sda_spec3) &&

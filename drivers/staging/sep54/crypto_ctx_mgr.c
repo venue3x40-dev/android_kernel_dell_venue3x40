@@ -409,7 +409,7 @@ int ctxmgr_map_kernel_ctx(struct client_crypto_ctx_info *ctx_info,
 	   contiguous for SeP DMA access) */
 	if ((((unsigned long)sep_ctx_p + sizeof(struct sep_ctx_cache_entry))
 	     >> PAGE_SHIFT) != ((unsigned long)sep_ctx_p >> PAGE_SHIFT)) {
-		pr_err("SeP context cross page boundary start=0x%lx len=0x%zX\n",
+		pr_err("SeP context cross page boundary start=0x%x len=0x%zX\n",
 		       (unsigned long)sep_ctx_p,
 		       sizeof(struct sep_ctx_cache_entry));
 		return -EINVAL;
@@ -1469,9 +1469,9 @@ int ctxmgr_get_symcipher_iv(struct client_crypto_ctx_info *ctx_info,
 		if (*iv_size_p < iv_size) {
 			rc = -ENOMEM;
 		} else {
-			if (iv_current != NULL && sep_ctx_iv != NULL)
+			if (iv_current != NULL)
 				memcpy(iv_current, sep_ctx_iv, iv_size);
-			if (iv_user != NULL && host_ctx_iv != NULL)
+			if (iv_user != NULL)
 				memcpy(iv_user, host_ctx_iv, iv_size);
 		}
 	}

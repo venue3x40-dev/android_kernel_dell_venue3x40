@@ -16,7 +16,7 @@ static int set_tp2e_crash(const char *val, struct kernel_param *kp)
 	memcpy(trace_tp2e_crash_str, val, strlen(val));
 
 	trace_tp2e_generic_event(TP2E_EV_INFO, "tp2e_test", ev_name,
-				 data0, data1, data2, "", "", "", "");
+				 data0, data1, data2, "", "", "");
 
 	return 0;
 }

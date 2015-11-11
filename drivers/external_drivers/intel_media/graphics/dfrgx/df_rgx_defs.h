@@ -83,11 +83,8 @@ struct gpu_util_stats {
 	* there was not enough data to calculate the ratios
 	*/
 	unsigned int				bValid;
-	unsigned int				bIncompleteData;
 	/* GPU active  ratio expressed in 0,01% units */
-	unsigned int				ui32GpuStatActiveHigh;
-	/* GPU active  ratio expressed in 0,01% units */
-	unsigned int				ui32GpuStatActiveLow;
+	unsigned int				ui32GpuStatActive;
 	/* GPU blocked ratio expressed in 0,01% units */
 	unsigned int				ui32GpuStatBlocked;
 	/* GPU idle    ratio expressed in 0,01% units */

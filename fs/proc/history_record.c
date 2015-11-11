@@ -115,11 +115,14 @@ void interrupt_dump_history(void)
 }
 EXPORT_SYMBOL(interrupt_dump_history);
 
-static ssize_t debug_read_history_record(struct file *f,
-		char __user *buf, size_t size, loff_t *off)
+static int debug_read_history_record(char *page, char **start, off_t off,
+		int count, int *eof, void *data)
 {
+	unsigned long len = 0;
+	page[len] = 0;
+
 	interrupt_dump_history();
-	return 0;
+	return len;
 }
 
 static const struct file_operations debug_history_proc_fops = {

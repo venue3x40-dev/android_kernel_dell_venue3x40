@@ -36,12 +36,11 @@ extern unsigned int sysctl_sched_min_granularity;
 extern unsigned int sysctl_sched_wakeup_granularity;
 extern unsigned int sysctl_sched_child_runs_first;
 
-#ifdef CONFIG_CPU_CONCURRENCY
-extern unsigned long sysctl_concurrency_sum_period;
-extern unsigned long sysctl_concurrency_decay_rate;
-extern int concurrency_decay_rate_handler(
-					struct ctl_table *table, int write, void __user *buffer,
-					size_t *lenp, loff_t *ppos);
+#ifdef CONFIG_CPU_SHIELDING
+extern unsigned int sysctl_shield_low_wm;
+extern unsigned int sysctl_shield_high_wm;
+extern unsigned int sysctl_shield_rate;
+extern unsigned int sysctl_shield_enable;
 #endif
 
 enum sched_tunable_scaling {

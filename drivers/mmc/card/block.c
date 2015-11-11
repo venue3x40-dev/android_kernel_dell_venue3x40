@@ -68,8 +68,6 @@ MODULE_ALIAS("mmc:block");
 #define PACKED_CMD_VER	0x01
 #define PACKED_CMD_WR	0x02
 
-#define MAX_DTR_DDR50	52000000
-
 static DEFINE_MUTEX(block_mutex);
 
 /*
@@ -651,30 +649,6 @@ static const struct block_device_operations mmc_bdops = {
 #endif
 };
 
-static int mmc_rpmb_reset(struct mmc_host *host, u8 part_config)
-{
-	int err = 0;
-
-	if (!mmc_card_mmc(host->card))
-		return err;
-
-	if ((part_config & 0x07) == EXT_CSD_PART_CONFIG_ACC_RPMB &&
-	    mmc_card_hs200(host->card)) {
-		pr_info("%s: disable eMMC HS200 on rpmb part\n", __func__);
-		host->card->last_max_dtr = host->card->ext_csd.hs_max_dtr;
-		host->card->ext_csd.hs_max_dtr = MAX_DTR_DDR50;
-		err = mmc_hw_reset(host);
-	} else if ((part_config & 0x07) != EXT_CSD_PART_CONFIG_ACC_RPMB &&
-	    host->card->last_max_dtr > MAX_DTR_DDR50) {
-		pr_info("%s: enable eMMC HS200 on non-rpmb part\n", __func__);
-		host->card->ext_csd.hs_max_dtr = host->card->last_max_dtr;
-		host->card->last_max_dtr = 0;
-		err = mmc_hw_reset(host);
-	}
-
-	return err;
-}
-
 static inline int mmc_blk_part_switch(struct mmc_card *card,
 				      struct mmc_blk_data *md)
 {
@@ -689,10 +663,6 @@ static inline int mmc_blk_part_switch(struct mmc_card *card,
 
 		part_config &= ~EXT_CSD_PART_CONFIG_ACC_MASK;
 		part_config |= md->part_type;
-
-		if (mmc_rpmb_reset(card->host, part_config))
-			pr_warn("%s: eMMC rpmb reset failed\n",
-				mmc_hostname(card->host));
 
 		ret = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
 				 EXT_CSD_PART_CONFIG, part_config,
@@ -860,7 +830,7 @@ static int mmc_blk_cmd_recovery(struct mmc_card *card, struct request *req,
 {
 	bool prev_cmd_status_valid = true;
 	u32 status, stop_status = 0;
-	int err, retry;
+	int err;
 
 	if (mmc_card_removed(card))
 		return ERR_NOMEDIUM;
@@ -870,18 +840,13 @@ static int mmc_blk_cmd_recovery(struct mmc_card *card, struct request *req,
 	 * and why there was no response.  If the first attempt fails,
 	 * we can't be sure the returned status is for the r/w command.
 	 */
-	for (retry = 2; retry >= 0; retry--) {
-		err = get_card_status(card, &status, 0);
-		if (!err)
-			break;
-
-		prev_cmd_status_valid = false;
-		pr_err("%s: error %d sending status command, %sing\n",
-		       req->rq_disk->disk_name, err, retry ? "retry" : "abort");
-	}
+	err = get_card_status(card, &status, 0);
 
 	/* We couldn't get a response from the card.  Give up. */
 	if (err) {
+		prev_cmd_status_valid = false;
+		pr_err("%s: error %d sending status command\n",
+			req->rq_disk->disk_name, err);
 		/* Check if the card is removed */
 		if (mmc_detect_card_removed(card->host))
 			return ERR_NOMEDIUM;
@@ -971,18 +936,6 @@ static int mmc_blk_reset(struct mmc_blk_data *md, struct mmc_host *host,
 		return -EEXIST;
 
 	md->reset_done |= type;
-	/*
-	 * It was observed that some kind of eMMC device may fail to response
-	 * to CMD suddenly during normal usage. And the issue dispeared if
-	 * the same eMMC device working in DDR50. So disabling HS200 and force
-	 * the eMMC device working in DDR50 before reset the eMMC device.
-	 */
-	if ((host->caps2 & MMC_CAP2_HS200_1_8V_SDR) &&
-	    (host->caps2 & MMC_CAP2_HS200_DIS)) {
-		pr_warn("%s: disable eMMC HS200 due to error\n", __func__);
-		host->caps2 &= ~MMC_CAP2_HS200_1_8V_SDR;
-		host->card->last_max_dtr = 0;
-	}
 	err = mmc_hw_reset(host);
 	/* Ensure we switch back to the correct partition */
 	if (err != -EOPNOTSUPP) {
@@ -1936,7 +1889,7 @@ static int mmc_blk_issue_rw_rq(struct mmc_queue *mq, struct request *rqc)
 	struct mmc_blk_data *md = mq->data;
 	struct mmc_card *card = md->queue.card;
 	struct mmc_blk_request *brq = &mq->mqrq_cur->brq;
-	int ret = 1, disable_multi = 0, retry = 0, type;
+	int ret = 1, disable_multi = 0, type;
 	enum mmc_blk_status status;
 	struct mmc_queue_req *mq_rq;
 	struct request *req = rqc;
@@ -2020,8 +1973,6 @@ static int mmc_blk_issue_rw_rq(struct mmc_queue *mq, struct request *rqc)
 				break;
 			goto cmd_abort;
 		case MMC_BLK_RETRY:
-			if (retry++ < 5)
-				break;
 			/* Fall through */
 		case MMC_BLK_ABORT:
 			if (!mmc_blk_reset(md, card->host, type))
@@ -2496,7 +2447,6 @@ force_ro_fail:
 #define CID_MANFID_TOSHIBA	0x11
 #define CID_MANFID_MICRON	0x13
 #define CID_MANFID_SAMSUNG	0x15
-#define CID_MANFID_HYNIX	0x90
 
 static const struct mmc_fixup blk_fixups[] =
 {
@@ -2554,9 +2504,6 @@ static const struct mmc_fixup blk_fixups[] =
 		  MMC_QUIRK_SEC_ERASE_TRIM_BROKEN),
 	MMC_FIXUP("VZL00M", CID_MANFID_SAMSUNG, CID_OEMID_ANY, add_quirk_mmc,
 		  MMC_QUIRK_SEC_ERASE_TRIM_BROKEN),
-
-	MMC_FIXUP("HBG4e", CID_MANFID_HYNIX, CID_OEMID_ANY, dis_cache_mmc,
-		  0),
 
 	END_FIXUP
 };

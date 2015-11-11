@@ -354,30 +354,8 @@ enum sst_gain_index {
  * TODO: Update with all modules
  */
 enum sst_module_id {
-	SST_MODULE_ID_PCM		  = 0x0001,
-	SST_MODULE_ID_MP3		  = 0x0002,
-	SST_MODULE_ID_MP24		  = 0x0003,
-	SST_MODULE_ID_AAC		  = 0x0004,
-	SST_MODULE_ID_AACP		  = 0x0005,
-	SST_MODULE_ID_EAACP		  = 0x0006,
-	SST_MODULE_ID_WMA9		  = 0x0007,
-	SST_MODULE_ID_WMA10		  = 0x0008,
-	SST_MODULE_ID_WMA10P		  = 0x0009,
-	SST_MODULE_ID_RA		  = 0x000A,
-	SST_MODULE_ID_DDAC3		  = 0x000B,
-	SST_MODULE_ID_TRUE_HD		  = 0x000C,
-	SST_MODULE_ID_HD_PLUS		  = 0x000D,
-
-	SST_MODULE_ID_SRC		  = 0x0064,
-	SST_MODULE_ID_DOWNMIX		  = 0x0066,
 	SST_MODULE_ID_GAIN_CELL		  = 0x0067,
 	SST_MODULE_ID_SPROT		  = 0x006D,
-	SST_MODULE_ID_BASS_BOOST	  = 0x006E,
-	SST_MODULE_ID_STEREO_WDNG	  = 0x006F,
-	SST_MODULE_ID_AV_REMOVAL	  = 0x0070,
-	SST_MODULE_ID_MIC_EQ		  = 0x0071,
-	SST_MODULE_ID_SPL		  = 0x0072,
-	SST_MODULE_ID_ALGO_VTSV           = 0x0073,
 	SST_MODULE_ID_NR		  = 0x0076,
 	SST_MODULE_ID_BWX		  = 0x0077,
 	SST_MODULE_ID_DRP		  = 0x0078,
@@ -393,6 +371,7 @@ enum sst_module_id {
 	SST_MODULE_ID_CONTEXT_ALGO_AWARE  = 0x0080,
 	SST_MODULE_ID_FIR_24		  = 0x0081,
 	SST_MODULE_ID_IIR_24		  = 0x0082,
+	SST_MODULE_ID_FILT_DCR		  = 0x0082,
 
 	SST_MODULE_ID_ASRC		  = 0x0083,
 	SST_MODULE_ID_TONE_GEN		  = 0x0084,
@@ -404,23 +383,11 @@ enum sst_module_id {
 	SST_MODULE_ID_IIR_16		  = 0x008A,
 	SST_MODULE_ID_DNR		  = 0x008B,
 
-	SST_MODULE_ID_VIRTUALIZER	  = 0x008C,
-	SST_MODULE_ID_VISUALIZATION	  = 0x008D,
-	SST_MODULE_ID_LOUDNESS_OPTIMIZER  = 0x008E,
-	SST_MODULE_ID_REVERBERATION	  = 0x008F,
-
 	SST_MODULE_ID_CNI_TX		  = 0x0090,
 	SST_MODULE_ID_REF_LINE		  = 0x0091,
 	SST_MODULE_ID_VOLUME		  = 0x0092,
-	SST_MODULE_ID_FILT_DCR		  = 0x0094,
-	SST_MODULE_ID_SLV		  = 0x009A,
-	SST_MODULE_ID_NLF		  = 0x009B,
-	SST_MODULE_ID_TNR		  = 0x009C,
-	SST_MODULE_ID_WNR		  = 0x009D,
 
-	SST_MODULE_ID_LOG		  = 0xFF00,
-
-	SST_MODULE_ID_TASK		  = 0xFFFF,
+	SST_MODULE_ID_TASK		  = 0xFFFF
 };
 
 enum sst_cmd {
@@ -434,13 +401,9 @@ enum sst_cmd {
 	FBA_VB_ANA		= 37,
 	FBA_VB_SET_FIR		= 38,
 	FBA_VB_SET_IIR		= 39,
-	SBA_VB_START_TONE	= 41,
-	SBA_VB_STOP_TONE	= 42,
 	FBA_VB_AEC		= 47,
 	FBA_VB_NR_UL		= 48,
 	FBA_VB_AGC		= 49,
-	FBA_VB_WNR		= 52,
-	FBA_VB_SLV		= 53,
 	FBA_VB_NR_DL		= 55,
 	SBA_PROBE		= 66,
 	MMX_PROBE		= 66,
@@ -464,16 +427,11 @@ enum sst_cmd {
 	SBA_SET_MEDIA_LOOP_MAP	= 118,
 	SBA_SET_MEDIA_PATH	= 119,
 	MMX_SET_MEDIA_PATH	= 119,
-	FBA_VB_TNR_UL		= 119,
-	FBA_VB_TNR_DL		= 121,
-	FBA_VB_NLF		= 125,
 	SBA_VB_LPRO		= 126,
-	FBA_VB_MDRP		= 127,
 	SBA_VB_SET_FIR          = 128,
 	SBA_VB_SET_IIR          = 129,
 	SBA_SET_SSP_SLOT_MAP	= 130,
 	AWARE_ENV_CLASS_PARAMS	= 130,
-	VAD_ENV_CLASS_PARAMS	= 2049,
 };
 
 enum sst_dsp_switch {
@@ -561,18 +519,14 @@ struct sst_cmd_set_media_path {
 	u16    switch_state;
 } __packed;
 
-struct pcm_cfg {
-		u8 s_length:2;
-		u8 rate:3;
-		u8 format:3;
-} __packed;
-
 struct sst_cmd_set_speech_path {
 	struct sst_dsp_header header;
 	u16    switch_state;
 	struct {
 		u16 rsvd:8;
-		struct pcm_cfg cfg;
+		u16 sample_length:2;
+		u16 rate:3;
+		u16 format:3;
 	} config;
 } __packed;
 
@@ -614,7 +568,9 @@ struct sst_cmd_sba_vb_start {
 union sba_media_loop_params {
 	struct {
 		u16 rsvd:8;
-		struct pcm_cfg cfg;
+		u16 sample_length:2;
+		u16 rate:3;
+		u16 format:3;
 	} part;
 	u16 full;
 } __packed;
@@ -624,11 +580,6 @@ struct sst_cmd_sba_set_media_loop_map {
 	u16	switch_state;
 	union	sba_media_loop_params param;
 	u16	map;
-} __packed;
-
-struct sst_cmd_tone_stop {
-	struct	sst_dsp_header header;
-	u16	switch_state;
 } __packed;
 
 enum sst_ssp_mode {
@@ -730,7 +681,9 @@ struct sst_cmd_probe {
 	u16 rsvd_2:5;
 	u16 probe_mode:2;
 	u16 rsvd_3:1;
-	struct pcm_cfg cfg;
+	u16 sample_length:2;
+	u16 rate:3;
+	u16 format:3;
 
 	u16 sm_buf_id;
 
@@ -743,11 +696,13 @@ struct sst_probe_config {
 	u16 loc_id;
 	u16 mod_id;
 	u8 task_id;
-	struct pcm_cfg cfg;
+	struct pcm_cfg {
+		u8 s_length:2;
+		u8 rate:3;
+		u8 format:3;
+	} cfg;
 };
 
 int sst_mix_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol);
 int sst_mix_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol);
-int sst_vtsv_enroll_set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol);
-int sst_vtsv_enroll_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol);
 #endif

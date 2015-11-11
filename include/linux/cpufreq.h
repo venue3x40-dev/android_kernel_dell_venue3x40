@@ -25,6 +25,10 @@
 #define CPUFREQ_NAME_LEN 16
 /* Print length for names. Extra 1 space for accomodating '\n' in prints */
 #define CPUFREQ_NAME_PLEN (CPUFREQ_NAME_LEN + 1)
+#define NR_ML_CPUS CONFIG_NR_CORES_PER_MODULE
+#define for_each_module_cpus(cpu, module) \
+	for (cpu = module * NR_ML_CPUS; \
+	cpu < (module * NR_ML_CPUS + NR_ML_CPUS); cpu++)
 
 
 /*********************************************************************
@@ -50,7 +54,14 @@ static inline int cpufreq_unregister_notifier(struct notifier_block *nb,
 	return 0;
 }
 static inline void disable_cpufreq(void) { }
+
 #endif		/* CONFIG_CPU_FREQ */
+
+struct cpufreq_cpu_shield_info {
+	int cpu_utilization;
+	bool is_not_valid;
+};
+DECLARE_PER_CPU(struct cpufreq_cpu_shield_info, cpu_shield_data);
 
 /* if (cpufreq_driver->target) exists, the ->governor decides what frequency
  * within the limits is used. If (cpufreq_driver->setpolicy> exists, these
@@ -76,7 +87,6 @@ extern struct kobject *cpufreq_global_kobject;
 struct cpufreq_cpuinfo {
 	unsigned int		max_freq;
 	unsigned int		min_freq;
-
 	/* in 10^(-9) s = nanoseconds */
 	unsigned int		transition_latency;
 };

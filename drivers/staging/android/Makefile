@@ -3,9 +3,6 @@ ccflags-y += -I$(src)			# needed for trace events
 obj-y					+= ion/
 
 obj-$(CONFIG_ANDROID_BINDER_IPC)	+= binder.o
-ifeq ($(CONFIG_X86_64),y)
-obj-$(CONFIG_ANDROID_BINDER_IPC)	+= binder_64.o
-endif
 obj-$(CONFIG_ASHMEM)			+= ashmem.o
 obj-$(CONFIG_ANDROID_LOGGER)		+= logger.o
 obj-$(CONFIG_ANDROID_LOGGER_PTI)	+= logger_pti.o

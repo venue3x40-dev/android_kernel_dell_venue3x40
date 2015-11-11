@@ -520,9 +520,7 @@ failReserve:
 failVMRAAlloc:
 failCheck:
 	_DevmemImportStructRelease(psImport);
-	OSLockAcquire(psHeap->hLock);
 	psHeap->uiImportCount--;
-	OSLockRelease(psHeap->hLock);
 failParams:
 	OSLockRelease(psDeviceImport->hLock);
 	PVR_ASSERT(eError != PVRSRV_OK);
@@ -551,6 +549,8 @@ IMG_VOID _DevmemImportStructDevUnmap(DEVMEM_IMPORT *psImport)
 	{
 		DEVMEM_HEAP *psHeap = psDeviceImport->psHeap;
 
+		OSLockRelease(psDeviceImport->hLock);
+
 		if (psDeviceImport->bMapped)
 		{
 			eError = BridgeDevmemIntUnmapPMR(psImport->hBridge,
@@ -565,17 +565,16 @@ IMG_VOID _DevmemImportStructDevUnmap(DEVMEM_IMPORT *psImport)
 	    RA_Free(psHeap->psQuantizedVMRA,
 	            psDeviceImport->sDevVAddr.uiAddr);
 
-		OSLockRelease(psDeviceImport->hLock);
-
 		_DevmemImportStructRelease(psImport);
 
 		OSLockAcquire(psHeap->hLock);
 		psHeap->uiImportCount--;
 		OSLockRelease(psHeap->hLock);
-	} else {
+	}
+	else
+	{
 		OSLockRelease(psDeviceImport->hLock);
 	}
-
 }
 
 /*
@@ -645,6 +644,8 @@ IMG_VOID _DevmemImportStructCPUUnmap(DEVMEM_IMPORT *psImport)
 
 	if (--psCPUImport->ui32RefCount == 0)
 	{
+		OSLockRelease(psCPUImport->hLock);
+
 		/* FIXME: psImport->uiSize is a 64-bit quantity where as the 5th
 		 * argument to OSUnmapPMR is a 32-bit quantity on 32-bit systems
 		 * hence a compiler warning of implicit cast and loss of data.
@@ -658,14 +659,12 @@ IMG_VOID _DevmemImportStructCPUUnmap(DEVMEM_IMPORT *psImport)
 					psCPUImport->hOSMMapData,
 					psCPUImport->pvCPUVAddr,
 					(IMG_SIZE_T)psImport->uiSize);
-
-		OSLockRelease(psCPUImport->hLock);
-
 		_DevmemImportStructRelease(psImport);
-	} else {
+	}
+	else
+	{
 		OSLockRelease(psCPUImport->hLock);
 	}
-
 }
 
 

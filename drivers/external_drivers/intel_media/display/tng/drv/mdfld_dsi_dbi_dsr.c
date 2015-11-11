@@ -148,10 +148,10 @@ static int enter_dsr_locked(struct mdfld_dsi_config *dsi_config, int level)
 	 */
 	drm_vblank_off(dev, dsi_config->pipe);
 
-	DC_MRFLD_onPowerOff(dsi_config->pipe);
-
 	/*turn off dbi interface put in ulps*/
 	__dbi_power_off(dsi_config);
+
+	DC_MRFLD_onPowerOff(dsi_config->pipe);
 
 	PSB_DEBUG_ENTRY("entered\n");
 	return 0;
@@ -180,7 +180,7 @@ int mdfld_dsi_dsr_update_panel_fb(struct mdfld_dsi_config *dsi_config)
 
 	dsr = dsi_config->dsr;
 
-	if (!IS_ANN(dev)) {
+	if (!IS_ANN_A0(dev)) {
 		/*if no dsr attached, return 0*/
 		if (!dsr)
 			return 0;
@@ -335,6 +335,9 @@ int mdfld_dsi_dsr_forbid(struct mdfld_dsi_config *dsi_config)
 	if (!dsi_config)
 		return -EINVAL;
 
+	if (!dsi_config || dsi_config->type != MDFLD_DSI_ENCODER_DBI)
+		return;
+
 	mutex_lock(&dsi_config->context_lock);
 
 	err = mdfld_dsi_dsr_forbid_locked(dsi_config);
@@ -381,6 +384,9 @@ int mdfld_dsi_dsr_allow(struct mdfld_dsi_config *dsi_config)
 
 	if (!dsi_config)
 		return -EINVAL;
+
+	if (!dsi_config || dsi_config->type != MDFLD_DSI_ENCODER_DBI)
+		return;
 
 	mutex_lock(&dsi_config->context_lock);
 

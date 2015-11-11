@@ -292,137 +292,69 @@ static RGXFWIF_GPU_UTIL_STATS RGXGetGpuUtilStats(PVRSRV_DEVICE_NODE *psDeviceNod
 {
 	PVRSRV_RGXDEV_INFO		*psDevInfo = psDeviceNode->pvDevice;
 	RGXFWIF_GPU_UTIL_FWCB	*psUtilFWCb = psDevInfo->psRGXFWIfGpuUtilFWCb;
-	IMG_UINT32				ui32StatActiveLow = 0, ui32StatActiveHigh = 0, ui32StatBlocked = 0, ui32StatIdle = 0;
+	IMG_UINT32				ui32StatActive = 0, ui32StatBlocked = 0, ui32StatIdle = 0;
 	IMG_UINT32				ui32StatCumulative = 0;
 	IMG_UINT32				ui32WOffSample;
 	IMG_UINT32				ui32WOffSampleSaved;
-	IMG_UINT64				ui64CurrentTimer;
+	IMG_UINT64				ui64CurrentCRTimer;
 	IMG_UINT32				ui32Remainder;
 	RGXFWIF_GPU_UTIL_STATS	sRet;
 	PVRSRV_DEV_POWER_STATE	ePowerState;
 	PVRSRV_ERROR            eError;
-       IMG_UINT32                              ui32Type;
-       IMG_UINT32                              ui32NextType;
-       
-       static RGXFWIF_GPU_UTIL_STATS   sPreviousStats;
-    static IMG_UINT32       ui32WarningTicks = 0;
 
-	/* init response */
-       sRet.ui32GpuStatActiveHigh = 0;
-       sRet.ui32GpuStatActiveLow  = 0;
-       sRet.ui32GpuStatBlocked    = 0;
-       sRet.ui32GpuStatIdle       = 0;
-       sRet.bValid                = IMG_FALSE;
-       sRet.bIncompleteData       = IMG_FALSE;
+	sRet.ui32GpuStatActive	= 0;
+	sRet.ui32GpuStatBlocked	= 0;
+	sRet.ui32GpuStatIdle	= 0;
+	sRet.bPoweredOn			= IMG_FALSE;
 
-	/* take the power lock as we might issue an OSReadHWReg64 below */
+	/* take the power lock as we issue an OSReadHWReg64 below */
 	PVRSRVForcedPowerLock();
 
 	PVRSRVGetDevicePowerState(psDeviceNode->sDevId.ui32DeviceIndex, &ePowerState);
-       if (ePowerState != PVRSRV_DEV_POWER_STATE_ON)   /* GPU powered off */
-       {
-               ui64CurrentTimer = OSClockus64() & RGXFWIF_GPU_UTIL_FWCB_OS_TIMER_MASK;
-               ui32NextType = RGXFWIF_GPU_UTIL_FWCB_TYPE_POWER_ON;
-       }
-       else     
+    if (ePowerState != PVRSRV_DEV_POWER_STATE_ON)
 	{
-               ui64CurrentTimer = (OSReadHWReg64(psDevInfo->pvRegsBaseKM, RGX_CR_TIMER) & ~RGX_CR_TIMER_VALUE_CLRMSK) >> RGX_CR_TIMER_VALUE_SHIFT;
-               ui32NextType = RGXFWIF_GPU_UTIL_FWCB_TYPE_CRTIME;
+		PVRSRVPowerUnlock();
+		return sRet;
 	}
-	PVRSRVPowerUnlock();
 
 	/* write offset is incremented after writing to FWCB, so subtract 1 */
-       ui32WOffSample = psUtilFWCb->ui32WriteOffset;
-       if(ui32WOffSample == 0)
-       {
-               ui32WOffSample = RGXFWIF_GPU_UTIL_FWCB_SIZE;
-       }
-       ui32WOffSample--;
+	ui32WOffSample = (psUtilFWCb->ui32WriteOffset - 1) & RGXFWIF_GPU_UTIL_FWCB_MASK;
 	ui32WOffSampleSaved = ui32WOffSample;
+	ui64CurrentCRTimer = (OSReadHWReg64(psDevInfo->pvRegsBaseKM, RGX_CR_TIMER) & ~RGX_CR_TIMER_VALUE_CLRMSK) >> RGX_CR_TIMER_VALUE_SHIFT;
 
 	do
 	{
 		IMG_UINT64	ui64FWCbEntryCurrent = psUtilFWCb->aui64CB[ui32WOffSample];
-
-               if (ui64FWCbEntryCurrent != RGXFWIF_GPU_UTIL_FWCB_RESERVED)
+		if (RGXFWIF_GPU_UTIL_FWCB_ENTRY_STATE(ui64FWCbEntryCurrent) != RGXFWIF_GPU_UTIL_FWCB_STATE_RESERVED)
 		{
-			IMG_UINT64 ui64Period = 0;
+			/* current sample is valid - let's calculate when it was sampled in host timeline */
 
-			ui32Type = RGXFWIF_GPU_UTIL_FWCB_ENTRY_TYPE(ui64FWCbEntryCurrent);
+			IMG_UINT32 psDVFSHistClock = 
+					psDevInfo->psGpuDVFSHistory->aui32DVFSClockCB[RGXFWIF_GPU_UTIL_FWCB_ENTRY_ID(ui64FWCbEntryCurrent)];
+			IMG_UINT64 ui64Period;
 
-			switch(ui32Type)
+			if (psDVFSHistClock < 256)
 			{
-                               case RGXFWIF_GPU_UTIL_FWCB_TYPE_CRTIME:
-                               {
-                                       IMG_UINT32 ui32DVFSHistClock =
-                                                       psDevInfo->psGpuDVFSHistory->aui32DVFSClockCB[RGXFWIF_GPU_UTIL_FWCB_ENTRY_ID(ui64FWCbEntryCurrent)];
-
-                                       if (ui32DVFSHistClock < 256)
-                                       {
-                                               /* DVFS frequency is 0 in DVFS history entry, which means that
-                                                               system layer doesn't define core clock frequency */
-                                               ui32StatCumulative = 0;
-
-                                               goto gpuutilstats_endloop;
-                                       }
-
-                                       if ( (RGXFWIF_GPU_UTIL_FWCB_ENTRY_CR_TIMER(ui64FWCbEntryCurrent) > ui64CurrentTimer) ||
-                                                (ui32NextType == RGXFWIF_GPU_UTIL_FWCB_TYPE_POWER_ON) ||
-                                                (ui32NextType == RGXFWIF_GPU_UTIL_FWCB_TYPE_POWER_OFF) )
-                                       {
-                                               /* CR timer value of current FW CB entry should always be smaller than in the next entry in the CB.
-                                                * Also, a regular CRTIME entry should be followed by another CRTIME entry or by an END_CRTIME entry.
-                                                * If these are not the cases, then we have a FW CB overlap. */
-                                               goto gpuutilstats_endloop;
-                                       }
-
-                                       /* Calculate the difference between current CR timer and CR timer at DVFS transition */
-                                       ui64Period = ui64CurrentTimer - RGXFWIF_GPU_UTIL_FWCB_ENTRY_CR_TIMER(ui64FWCbEntryCurrent);
-
-                                       /* Scale the difference to microseconds */
-                                       ui64Period = OSDivide64((ui64Period * 1000000), (ui32DVFSHistClock / 256), &ui32Remainder);
-
-                                       /* Update "now" to CR Timer of current entry */
-                                       ui64CurrentTimer = RGXFWIF_GPU_UTIL_FWCB_ENTRY_CR_TIMER(ui64FWCbEntryCurrent);
-
-                                       break;
-                               }
-
-                               case RGXFWIF_GPU_UTIL_FWCB_TYPE_POWER_OFF:
-
-                                       /* Calculate the difference between OS timers at power-on/power-off transitions */
-                                       ui64Period = ui64CurrentTimer - RGXFWIF_GPU_UTIL_FWCB_ENTRY_OS_TIMER(ui64FWCbEntryCurrent);
-
-                                       break;
-
-                               case RGXFWIF_GPU_UTIL_FWCB_TYPE_POWER_ON:
-                               case RGXFWIF_GPU_UTIL_FWCB_TYPE_END_CRTIME:
-
-                                       /* Update "now" to the Timer of current entry */
-                                       if(ui32Type == RGXFWIF_GPU_UTIL_FWCB_TYPE_POWER_ON)
-                                       {
-                                               ui64CurrentTimer = RGXFWIF_GPU_UTIL_FWCB_ENTRY_OS_TIMER(ui64FWCbEntryCurrent);
-                                       }
-                                       else
-                                       {
-                                               ui64CurrentTimer = RGXFWIF_GPU_UTIL_FWCB_ENTRY_CR_TIMER(ui64FWCbEntryCurrent);
-                                       }
-
-                                       /* Move to next-previous state transition */
-                                       if(ui32WOffSample == 0)
-                                       {
-                                               ui32WOffSample = RGXFWIF_GPU_UTIL_FWCB_SIZE;
-                                       }
-                                       ui32WOffSample--;
-
-                                       /* Remember the next-previous entry type */
-                                       ui32NextType = ui32Type;
-
-                                       continue;
-                               default:
-                                       PVR_DPF((PVR_DBG_WARNING,"RGXGetGpuUtilStats: Wrong type: %8.8X\n", ui32Type));
-                                       break;
+				/* DVFS frequency is 0 in DVFS history entry, which means that 
+						system layer doesn't define core clock frequency */
+				ui32StatCumulative = 0;
+				break;
 			}
+
+			if (RGXFWIF_GPU_UTIL_FWCB_ENTRY_TIMER(ui64FWCbEntryCurrent) > ui64CurrentCRTimer)
+			{
+				/* CR timer value of current FW CB entry should always be smaller than in the next entry in the CB. 
+				  If it's greater then we have a FW CB overlap. */
+				break;
+			}
+
+			/* Calculate the difference between current CR timer and CR timer at DVFS transition. */
+			ui64Period = ui64CurrentCRTimer - RGXFWIF_GPU_UTIL_FWCB_ENTRY_TIMER(ui64FWCbEntryCurrent);
+			/* Scale the difference to microseconds */
+			ui64Period = OSDivide64((ui64Period * 1000000), (psDVFSHistClock / 256), &ui32Remainder);
+		
+			/* Update "now" to CR Timer of current entry */
+			ui64CurrentCRTimer = RGXFWIF_GPU_UTIL_FWCB_ENTRY_TIMER(ui64FWCbEntryCurrent);
 
 			/* If calculated period goes beyond the time window that we want to look at to calculate stats,
 				cut it down to this window */
@@ -437,14 +369,11 @@ static RGXFWIF_GPU_UTIL_STATS RGXGetGpuUtilStats(PVRSRV_DEVICE_NODE *psDeviceNod
 			/* Update per-state cumulative times */
 			switch (RGXFWIF_GPU_UTIL_FWCB_ENTRY_STATE(ui64FWCbEntryCurrent))
 			{
-                               case RGXFWIF_GPU_UTIL_FWCB_STATE_ACTIVE_LOW:
-                                       ui32StatActiveLow += (IMG_UINT32)ui64Period;
-                                       break;
 				case RGXFWIF_GPU_UTIL_FWCB_STATE_IDLE:
 					ui32StatIdle += (IMG_UINT32)ui64Period;
 					break;
-                               case RGXFWIF_GPU_UTIL_FWCB_STATE_ACTIVE_HIGH:
-                                       ui32StatActiveHigh += (IMG_UINT32)ui64Period;
+				case RGXFWIF_GPU_UTIL_FWCB_STATE_ACTIVE:
+					ui32StatActive += (IMG_UINT32)ui64Period;
 					break;
 				case RGXFWIF_GPU_UTIL_FWCB_STATE_BLOCKED:
 					ui32StatBlocked += (IMG_UINT32)ui64Period;
@@ -458,55 +387,26 @@ static RGXFWIF_GPU_UTIL_STATS RGXGetGpuUtilStats(PVRSRV_DEVICE_NODE *psDeviceNod
 		}
 
 		/* Move to next-previous state transition */
-               if(ui32WOffSample == 0)
-               {
-                       ui32WOffSample = RGXFWIF_GPU_UTIL_FWCB_SIZE;
-               }
-               ui32WOffSample--;
-
-               /* Remember the next-previous entry type */
-               ui32NextType = ui32Type;
+		ui32WOffSample = (ui32WOffSample - 1) & RGXFWIF_GPU_UTIL_FWCB_MASK;
 	}
 	/* break if we wrapped up the CB or we have already calculated the whole window */
 	while ((ui32WOffSample != ui32WOffSampleSaved) && (ui32StatCumulative < RGXFWIF_GPU_STATS_WINDOW_SIZE_US));
 
-gpuutilstats_endloop:
+	// INTEL TO REVIEW
+	// DDK1.3@271... put the power unlock before the stats update.
+	PVRSRVPowerUnlock();
 
 	if (ui32StatCumulative)
 	{
 		/* Update stats */
-               sRet.ui32GpuStatActiveLow       = OSDivide64(((IMG_UINT64)ui32StatActiveLow * RGXFWIF_GPU_STATS_MAX_VALUE_OF_STATE), ui32StatCumulative, &ui32Remainder);
-               sRet.ui32GpuStatActiveHigh      = OSDivide64(((IMG_UINT64)ui32StatActiveHigh * RGXFWIF_GPU_STATS_MAX_VALUE_OF_STATE), ui32StatCumulative, &ui32Remainder);
-               sRet.ui32GpuStatBlocked     = OSDivide64(((IMG_UINT64)ui32StatBlocked * RGXFWIF_GPU_STATS_MAX_VALUE_OF_STATE), ui32StatCumulative, &ui32Remainder);
-               sRet.ui32GpuStatIdle        = OSDivide64(((IMG_UINT64)ui32StatIdle * RGXFWIF_GPU_STATS_MAX_VALUE_OF_STATE), ui32StatCumulative, &ui32Remainder);
-               sRet.bValid                 = IMG_TRUE;
-
-               if(ui32StatCumulative < RGXFWIF_GPU_STATS_WINDOW_SIZE_US)
-               {
-#define RGX_GPU_UTIL_STAT_MULTIPLIER 1000      /* Multiply everything to get some better accuracy when weighting last and previous values */
-#define RGX_GPU_UTIL_STAT_SCALE 4                      /* Give less importance to the values just computed */
-#define RGX_GPU_UTIL_STAT_WARNING_PERIOD 8
-                       IMG_UINT32 ui32LastStatWeight = (RGX_GPU_UTIL_STAT_MULTIPLIER * ui32StatCumulative)/(RGX_GPU_UTIL_STAT_SCALE * RGXFWIF_GPU_STATS_WINDOW_SIZE_US);
-                       IMG_UINT32 ui32PrevStatWeight = (RGX_GPU_UTIL_STAT_MULTIPLIER - ui32LastStatWeight);
-
-                       sRet.ui32GpuStatActiveHigh  = ( (sRet.ui32GpuStatActiveHigh * ui32LastStatWeight) + (sPreviousStats.ui32GpuStatActiveHigh * ui32PrevStatWeight) ) / RGX_GPU_UTIL_STAT_MULTIPLIER;
-                       sRet.ui32GpuStatActiveLow   = ( (sRet.ui32GpuStatActiveLow * ui32LastStatWeight) + (sPreviousStats.ui32GpuStatActiveLow * ui32PrevStatWeight) ) / RGX_GPU_UTIL_STAT_MULTIPLIER;
-                       sRet.ui32GpuStatBlocked     = ( (sRet.ui32GpuStatBlocked * ui32LastStatWeight) + (sPreviousStats.ui32GpuStatBlocked * ui32PrevStatWeight) ) / RGX_GPU_UTIL_STAT_MULTIPLIER;
-                       sRet.ui32GpuStatIdle        = ( (sRet.ui32GpuStatIdle * ui32LastStatWeight) + (sPreviousStats.ui32GpuStatIdle * ui32PrevStatWeight) ) / RGX_GPU_UTIL_STAT_MULTIPLIER;
-                       sRet.bIncompleteData        = IMG_TRUE;
-            
-            if((ui32WarningTicks % RGX_GPU_UTIL_STAT_WARNING_PERIOD) == 0)
-            {
-                PVR_DPF((PVR_DBG_WARNING,"RGXGetGpuUtilStats: Time window shorter than expected, returned data may be inaccurate\n"));
-            }
-            ui32WarningTicks++;
-               }
-
-               sPreviousStats.ui32GpuStatActiveLow  = sRet.ui32GpuStatActiveLow;
-               sPreviousStats.ui32GpuStatActiveHigh = sRet.ui32GpuStatActiveHigh;
-               sPreviousStats.ui32GpuStatBlocked    = sRet.ui32GpuStatBlocked;
-               sPreviousStats.ui32GpuStatIdle       = sRet.ui32GpuStatIdle;
+		sRet.ui32GpuStatActive	= OSDivide64(((IMG_UINT64)ui32StatActive * RGXFWIF_GPU_STATS_MAX_VALUE_OF_STATE), ui32StatCumulative, &ui32Remainder);
+		sRet.ui32GpuStatBlocked	= OSDivide64(((IMG_UINT64)ui32StatBlocked * RGXFWIF_GPU_STATS_MAX_VALUE_OF_STATE), ui32StatCumulative, &ui32Remainder);
+		sRet.ui32GpuStatIdle	= OSDivide64(((IMG_UINT64)ui32StatIdle * RGXFWIF_GPU_STATS_MAX_VALUE_OF_STATE), ui32StatCumulative, &ui32Remainder);
+		sRet.bPoweredOn			= IMG_TRUE;
 	}
+
+	// Moved upwards
+	//PVRSRVPowerUnlock();
 
 	return sRet;
 }
@@ -659,14 +559,6 @@ PVRSRV_ERROR PVRSRVRGXInitDevPart2KM (PVRSRV_DEVICE_NODE	*psDeviceNode,
 
 	/* Allocate DVFS History */
 	psDevInfo->psGpuDVFSHistory = OSAllocZMem(sizeof(*(psDevInfo->psGpuDVFSHistory)));
-
-	if (psDevInfo->psGpuDVFSHistory == IMG_NULL)
-		return PVRSRV_ERROR_OUT_OF_MEMORY;
-
-	/* Reset DVFS history */
-	psDevInfo->psGpuDVFSHistory->ui32CurrentDVFSId = 0;
-	psDevInfo->psGpuDVFSHistory->aui32DVFSClockCB[0] = 0;
-
 	/* Setup GPU Utilization stat update callback */
 #if !defined(NO_HARDWARE)
 	psDevInfo->pfnGetGpuUtilStats = RGXGetGpuUtilStats;
@@ -691,8 +583,6 @@ PVRSRV_ERROR PVRSRVRGXInitDevPart2KM (PVRSRV_DEVICE_NODE	*psDeviceNode,
 			psDevInfo->pfnActivePowerCheck = RGXCheckFWActivePowerState;
 			/* Prevent the device being woken up before there is something to do. */
 			eDefaultPowerState = PVRSRV_DEV_POWER_STATE_OFF;
-
-			RGXInitPowerRequestWQ();
 		}
 	}
 #endif
@@ -1211,10 +1101,6 @@ PVRSRV_ERROR PVRSRVRGXInitFirmwareKM(PVRSRV_DEVICE_NODE			*psDeviceNode,
 							     psRGXFwInit,
 							     ui32APMLatency,
 							     ui32CoreClockSpeed);
-
-	OSFreeMem(pui32BIFTilingXStrides);
-	pui32BIFTilingXStrides = IMG_NULL;
-
 	if (eError != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR,"PVRSRVRGXInitFirmwareKM: RGXSetupFirmware failed (%u)", eError));
@@ -1224,8 +1110,7 @@ PVRSRV_ERROR PVRSRVRGXInitFirmwareKM(PVRSRV_DEVICE_NODE			*psDeviceNode,
 	return eError;
 
 failed_init_firmware:
-	if (pui32BIFTilingXStrides != IMG_NULL)
-		OSFreeMem(pui32BIFTilingXStrides);
+
 failed_to_pass_compatibility_check:
 	PVR_ASSERT(eError != PVRSRV_OK);
 	return eError;
@@ -1395,9 +1280,6 @@ PVRSRV_ERROR DevDeInitRGX (PVRSRV_DEVICE_NODE *psDeviceNode)
 		/* De-init Freelists/ZBuffers... */
 		OSLockDestroy(psDevInfo->hLockFreeList);
 		OSLockDestroy(psDevInfo->hLockZSBuffer);
-
-		/* De-init */
-		OSWRLockDestroy(psDevInfo->hLockRenderList);
 
 		/* De-init HWPerf Ftrace thread resources for the RGX device */
 #if defined(SUPPORT_GPUTRACE_EVENTS)
@@ -1752,13 +1634,6 @@ PVRSRV_ERROR RGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 	}
 	OSMemSet (psDevInfo, 0, sizeof(*psDevInfo));
 
-	eError = OSWRLockCreate(&(psDevInfo->hLockRenderList));
-        if (eError != PVRSRV_OK)
-	{
-		PVR_DPF((PVR_DBG_ERROR, "%s: Failed to create render context list lock", __func__));	
-		goto e0;
-	}
-	
 	dllist_init(&(psDevInfo->sRenderCtxtListHead));
 	dllist_init(&(psDevInfo->sComputeCtxtListHead));
 	dllist_init(&(psDevInfo->sTransferCtxtListHead));

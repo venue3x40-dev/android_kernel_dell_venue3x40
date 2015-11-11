@@ -250,27 +250,4 @@ void desc_q_pack_app_req_desc(struct sep_sw_desc *desc_p,
  */
 const char *crypto_proc_mode_to_str(enum sep_proc_mode proc_mode);
 
-inline u32 add_cookie(uintptr_t op_ctx);
-
-inline void delete_cookie(u32 index);
-
-inline void delete_context(uintptr_t op_ctx);
-
-inline uintptr_t get_cookie(u32 index);
-
-#define SEP_SW_DESC_GET_COOKIE(desc_p)\
-	((struct sep_op_ctx *)get_cookie(((u32 *)desc_p)[SEP_SW_DESC_COOKIE_WORD_OFFSET]))
-
-#define SEP_SW_DESC_SET_COOKIE(desc_p, op_ctx) \
-do {\
-	u32 __ctx_ptr__ = 0;\
-	if (op_ctx == NULL) {\
-		delete_cookie(((u32 *)desc_p)[SEP_SW_DESC_COOKIE_WORD_OFFSET]);\
-	} else {\
-		__ctx_ptr__ = add_cookie((uintptr_t)op_ctx);\
-	} \
-	memcpy(((u32 *)desc_p) + SEP_SW_DESC_COOKIE_WORD_OFFSET,\
-	&__ctx_ptr__, sizeof(u32));\
-} while (0)
-
 #endif /*_DESC_MGR_H_*/

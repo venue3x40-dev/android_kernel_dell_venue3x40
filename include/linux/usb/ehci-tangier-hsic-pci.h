@@ -103,7 +103,7 @@ struct hsic_tangier_priv {
 	struct wake_lock            resume_wake_lock;
 	struct wake_lock            s3_wake_lock;
 	enum wlock_state            s3_wlock_state;
-	enum s3_state               s3_rt_state;
+	enum wlock_state            s3_rt_state;
 };
 
 enum {

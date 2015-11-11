@@ -67,7 +67,6 @@ struct panel_info {
 	u32 width_mm;
 	u32 height_mm;
 
-	bool panel_180_rotation;
 	/*other infos*/
 };
 
@@ -111,6 +110,5 @@ struct intel_mid_panel_list {
 extern void mdfld_output_init(struct drm_device *dev);
 extern enum panel_type get_panel_type(struct drm_device *dev, int pipe);
 extern bool is_dual_dsi(struct drm_device *dev);
-extern bool is_dual_panel(struct drm_device *dev);
 
 #endif

@@ -47,19 +47,19 @@ struct dwc_device_par {
 #endif
 
 #define otg_dbg(d, fmt, args...)  \
-	do { dev_dbg((d)->dev, \
+	do { if (DWC_OTG_DEBUG) dev_dbg((d)->dev, \
 			"%s(): " fmt , __func__, ## args); } while (0)
 #define otg_vdbg(d, fmt, args...)  \
 	do { if (DWC_OTG_DEBUG) dev_dbg((d)->dev, \
 			"%s(): " fmt , __func__, ## args); } while (0)
 #define otg_err(d, fmt, args...)  \
-	do { dev_err((d)->dev, \
+	do { if (DWC_OTG_DEBUG) dev_err((d)->dev, \
 			"%s(): " fmt , __func__, ## args); } while (0)
 #define otg_warn(d, fmt, args...)  \
-	do { dev_warn((d)->dev, \
+	do { if (DWC_OTG_DEBUG) dev_warn((d)->dev, \
 			"%s(): " fmt , __func__, ## args); } while (0)
 #define otg_info(d, fmt, args...)  \
-	do { dev_info((d)->dev, \
+	do { if (DWC_OTG_DEBUG) dev_info((d)->dev, \
 			"%s(): " fmt , __func__, ## args); } while (0)
 
 #ifdef DEBUG
@@ -385,6 +385,7 @@ struct dwc_otg2 {
 
 #define VBUS_TIMEOUT	20
 #define PCI_DEVICE_ID_DWC 0x119E
+#define PCI_DEVICE_ID_DWC_VLV 0x0F37
 
 enum dwc3_otg_mode {
 	DWC3_DEVICE_ONLY,

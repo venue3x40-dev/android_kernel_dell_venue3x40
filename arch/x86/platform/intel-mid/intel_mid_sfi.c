@@ -9,7 +9,7 @@
  * as published by the Free Software Foundation; version 2
  * of the License.
  */
-
+#define DEBUG
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/interrupt.h>
@@ -30,6 +30,7 @@
 #include <linux/mmc/core.h>
 #include <linux/mmc/card.h>
 #include <linux/blkdev.h>
+#include <linux/intel_mid_hwid.h>
 
 #include <asm/setup.h>
 #include <asm/mpspec_def.h>
@@ -44,6 +45,7 @@
 #include <asm/apb_timer.h>
 #include <linux/reboot.h>
 #include "intel_mid_weak_decls.h"
+#include <asm/spid.h>
 
 #define	SFI_SIG_OEM0	"OEM0"
 #define MAX_IPCDEVS	24
@@ -60,10 +62,13 @@ static int spi_next_dev;
 static int i2c_next_dev;
 static int i2c_bus[MAX_SCU_I2C];
 static int gpio_num_entry;
-static unsigned int watchdog_irq_num = 0xff;
 static u32 sfi_mtimer_usage[SFI_MTMR_MAX_NUM];
 int sfi_mrtc_num;
 int sfi_mtimer_num;
+u8 ifwi_major_version;
+u8 ifwi_minor_version;
+
+struct hardware_id_table hardware_id_detect;
 
 struct sfi_rtc_table_entry sfi_mrtc_array[SFI_MRTC_MAX];
 EXPORT_SYMBOL_GPL(sfi_mrtc_array);
@@ -72,10 +77,6 @@ struct blocking_notifier_head intel_scu_notifier =
 			BLOCKING_NOTIFIER_INIT(intel_scu_notifier);
 EXPORT_SYMBOL_GPL(intel_scu_notifier);
 
-unsigned int sfi_get_watchdog_irq(void)
-{
-	return watchdog_irq_num;
-}
 
 /* parse all the mtimer info to a static mtimer array */
 int __init sfi_parse_mtmr(struct sfi_table_header *table)
@@ -194,6 +195,7 @@ static int __init sfi_parse_gpio(struct sfi_table_header *table)
 {
 	struct sfi_table_simple *sb;
 	struct sfi_gpio_table_entry *pentry;
+	struct sfi_gpio_table_entry *pentry2;
 	int num, i;
 
 	if (gpio_table)
@@ -201,6 +203,7 @@ static int __init sfi_parse_gpio(struct sfi_table_header *table)
 	sb = (struct sfi_table_simple *)table;
 	num = SFI_GET_NUM_ENTRIES(sb, struct sfi_gpio_table_entry);
 	pentry = (struct sfi_gpio_table_entry *)sb->pentry;
+	pentry2 = pentry;
 
 	gpio_table = (struct sfi_gpio_table_entry *)
 				kmalloc(num * sizeof(*pentry), GFP_KERNEL);
@@ -209,13 +212,21 @@ static int __init sfi_parse_gpio(struct sfi_table_header *table)
 	memcpy(gpio_table, pentry, num * sizeof(*pentry));
 	gpio_num_entry = num;
 
-	pr_debug("GPIO pin info:\n");
-	for (i = 0; i < num; i++, pentry++)
-		pr_debug("info[%2d]: controller = %16.16s, pin_name = %16.16s, pin = %d\n",
+	pr_info("GPIO pin info:\n");
+	for (i = 0; i < num; i++, pentry++) {
+		if (!strncmp(pentry->pin_name, "CAM_0_AF_EN", 11))
+			pentry->pin_no = 1;
+		if (!strncmp(pentry->pin_name, "camera0_sb2", 11))
+			pentry->pin_no = 0;
+		pr_info("info[%2d]: controller = %16.16s, pin_name = %16.16s, pin = %d\n",
 			i,
 			pentry->controller_name,
 			pentry->pin_name,
 			pentry->pin_no);
+	}
+	memcpy(gpio_table, pentry2, num * sizeof(*pentry2));
+	gpio_num_entry = num;
+
 	return 0;
 }
 
@@ -498,6 +509,103 @@ struct devs_id __init *get_device_id(u8 type, char *name)
 	return NULL;
 }
 
+//[wang.xiaojun, add for ifwi wersion, 20140214]
+static ssize_t ifwi_version_show(struct device *dev,struct device_attribute *attr,char *buf)
+{
+	  return sprintf(buf, "%02X.%02X\n", ifwi_major_version, ifwi_minor_version);
+}
+
+static struct kobj_attribute ifwi_version_attr = {
+	.attr = {
+		.name = "ifwi_version",
+		.mode = S_IRUGO,
+	},
+	.show = ifwi_version_show,
+};
+static struct kobject *board_properties;
+static int __init intel_mid_ifwi_version(void)
+{
+	int ret = 0;
+
+	board_properties = kobject_create_and_add("oemb", NULL);
+	if (!board_properties) {
+		pr_err("failed to create /sys/ifwi\n");
+		ret = -EINVAL;
+	}
+
+	sysfs_create_file(board_properties, &ifwi_version_attr.attr);
+
+	return ret;
+}
+
+static ssize_t intel_mid_hardware_id_show(struct device *dev,struct device_attribute *attr,char *buf)
+{
+	  return sprintf(buf, "%01x\n", hardware_id_detect.hardware_id_num);
+}
+
+static ssize_t intel_mid_panel_id_show(struct device *dev,struct device_attribute *attr,char *buf)
+{
+	  return sprintf(buf, "%01X\n", hardware_id_detect.panel_id_num);
+}
+
+static struct kobj_attribute hardware_id_attr = {
+	.attr = {
+		.name = "board_id",
+		.mode = S_IRUGO,
+		},
+	.show = intel_mid_hardware_id_show,
+};
+
+static struct kobj_attribute panel_id_attr = {
+	.attr = {
+		.name = "panel_id",
+		.mode = S_IRUGO,
+		},
+	.show = intel_mid_panel_id_show,
+};
+
+static struct kobject *hardware_properties;
+static int __init intel_mid_hardware_detect_init(void)
+{
+	int ret = 0;
+
+	hardware_properties = kobject_create_and_add("hardware_id", NULL);
+	if (!hardware_properties) {
+		pr_err("failed to create /sys/hardware_id\n");
+		ret = -EINVAL;
+	}
+
+	sysfs_create_file(hardware_properties, &hardware_id_attr.attr);
+	sysfs_create_file(hardware_properties, &panel_id_attr.attr);
+//	intel_mid_hardware_id_detect();
+
+	return ret;
+}
+
+int intel_mid_get_board_id(void)
+{
+	return hardware_id_detect.hardware_id_num;
+}
+EXPORT_SYMBOL_GPL(intel_mid_get_board_id);
+
+int intel_mid_get_panel_id(void)
+{
+	return hardware_id_detect.panel_id_num;
+}
+EXPORT_SYMBOL_GPL(intel_mid_get_panel_id);
+
+void intel_mid_set_board_id(int board_id)
+{
+	hardware_id_detect.hardware_id_num = board_id;
+}
+EXPORT_SYMBOL_GPL(intel_mid_set_board_id);
+
+void intel_mid_set_panel_id(int panel_id)
+{
+	hardware_id_detect.panel_id_num = panel_id;
+}
+EXPORT_SYMBOL_GPL(intel_mid_set_panel_id);
+
 static int __init sfi_parse_devs(struct sfi_table_header *table)
 {
 	struct sfi_table_simple *sb;
@@ -517,6 +625,7 @@ static int __init sfi_parse_devs(struct sfi_table_header *table)
 
 	for (i = 0; i < num; i++, pentry++) {
 		int irq = pentry->irq;
+
 		if (irq != (u8)0xff) { /* native RTE case */
 			/* these SPI2 devices are not exposed to system as PCI
 			 * devices, but they have separate RTE entry in IOAPIC
@@ -543,10 +652,6 @@ static int __init sfi_parse_devs(struct sfi_table_header *table)
 					else
 						/* active high */
 						irq_attr.polarity = 0;
-					/* catch watchdog interrupt number */
-					if (!strncmp(pentry->name,
-							"watchdog", 8))
-						watchdog_irq_num = (unsigned int) irq;
 				} else {
 					/* PNW and CLV go with active low */
 					irq_attr.polarity = 1;
@@ -556,8 +661,35 @@ static int __init sfi_parse_devs(struct sfi_table_header *table)
 				pr_info("APIC entry not found for: name=%s, irq=%d, ioapic=%d\n",
 					pentry->name, irq, ioapic);
 		}
-		dev = get_device_id(pentry->type, pentry->name);
+		pr_info("pentry->name222:%s\n", pentry->name);
 
+		if (!strncmp(pentry->name, "ov5693", 6))
+			strcpy(pentry->name, "no_use");	
+		if (!strncmp(pentry->name, "imx135", 6))
+			strcpy(pentry->name, "ov5693");
+#if 0
+               if (!strncmp(pentry->name, "imx132", 6))
+	                 strcpy(pentry->name, "ov9724");
+
+              if (!strncmp(pentry->name, "ov9724", 6))		//add 8 inch support
+                        strcpy(pentry->name, "ov2722");
+
+#endif
+
+
+
+		if(!strncmp(pentry->name, "bq27x00_battery", 15)){
+			strcpy(pentry->name, "bq27441");
+		}
+		
+		dev = get_device_id(pentry->type, pentry->name);
+		if(!strncmp(pentry->name, "bq27441", 7)){
+			pr_info("pentry->name:%s\n", pentry->name);
+			pr_info("this is dev->name=%s",dev->name);
+			if(dev->get_platform_data == NULL)
+				pr_info("bq27x00_battery_dev->get_platform_data is Null");
+			pentry->addr = (u16)0x55;
+		}
 		if ((dev == NULL) || (dev->get_platform_data == NULL))
 			continue;
 
@@ -609,6 +741,9 @@ static int __init sfi_parse_oemb(struct sfi_table_header *table)
 	u8 oem_id[SFI_OEM_ID_SIZE + 1] = {'\0'};
 	u8 oem_table_id[SFI_OEM_TABLE_ID_SIZE + 1] = {'\0'};
 
+	/* parse SPID and SSN out from OEMB table */
+	sfi_handle_spid(table);
+
 	oemb = (struct sfi_table_oemb *) table;
 	if (!oemb) {
 		pr_err("%s: fail to read SFI OEMB Layout\n",
@@ -617,6 +752,9 @@ static int __init sfi_parse_oemb(struct sfi_table_header *table)
 	}
 
 	board_id = oemb->board_id | (oemb->board_fab << 4);
+
+	ifwi_major_version = oemb->ifwi_major_version;
+	ifwi_minor_version = oemb->ifwi_minor_version;
 
 	snprintf(sig, (SFI_SIGNATURE_SIZE + 1), "%s", oemb->header.sig);
 	snprintf(oem_id, (SFI_OEM_ID_SIZE + 1), "%s", oemb->header.oem_id);
@@ -675,10 +813,14 @@ void *get_oem0_table(void)
 static int __init intel_mid_platform_init(void)
 {
 	/* Get SFI OEMB Layout */
+
 	sfi_table_parse(SFI_SIG_OEMB, NULL, NULL, sfi_parse_oemb);
 	sfi_table_parse(SFI_SIG_GPIO, NULL, NULL, sfi_parse_gpio);
 	sfi_table_parse(SFI_SIG_OEM0, NULL, NULL, sfi_parse_oem0);
 	sfi_table_parse(SFI_SIG_DEVS, NULL, NULL, sfi_parse_devs);
+
+	intel_mid_ifwi_version();	//add for IFWI version read
+	intel_mid_hardware_detect_init();
 
 	return 0;
 }

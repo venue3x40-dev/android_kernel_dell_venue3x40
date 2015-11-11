@@ -77,48 +77,37 @@ struct sst_ids {
 	u8  task_id;
 	u8  format;
 	u8  reg;
-	const char *parent_wname;
-	struct snd_soc_dapm_widget *parent_w;
 	struct list_head algo_list;
 	struct list_head gain_list;
-	const struct sst_pcm_format *pcm_fmt;
+	const struct sst_ssp_cfg *ssp;
 };
 
-
-#define SST_AIF_IN(wname, wevent)							\
+#define SST_SSP_AIF_IN(wname, wevent, wssp_cfg)						\
 {	.id = snd_soc_dapm_aif_in, .name = wname, .sname = NULL,			\
 	.reg = SND_SOC_NOPM, .shift = 0, .invert = 0,					\
 	.event = wevent, .event_flags = SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD,	\
-	.priv = (void *)&(struct sst_ids) { .task_id = 0, .location_id = 0 }		\
+	.priv = (void *)&(struct sst_ids) { .ssp = &wssp_cfg, }				\
 }
 
-#define SST_AIF_OUT(wname, wevent)							\
+#define SST_SSP_AIF_OUT(wname, wevent, wssp_cfg)					\
 {	.id = snd_soc_dapm_aif_out, .name = wname, .sname = NULL,			\
 	.reg = SND_SOC_NOPM, .shift = 0, .invert = 0,					\
 	.event = wevent, .event_flags = SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD,	\
-	.priv = (void *)&(struct sst_ids) { .task_id = 0, .location_id = 0 }		\
+	.priv = (void *)&(struct sst_ids) { .ssp = &wssp_cfg, }				\
 }
 
-#define SST_INPUT(wname, wevent)							\
+#define SST_SSP_INPUT(wname, wevent, wssp_cfg)						\
 {	.id = snd_soc_dapm_input, .name = wname, .sname = NULL,				\
 	.reg = SND_SOC_NOPM, .shift = 0, .invert = 0,					\
 	.event = wevent, .event_flags = SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD,	\
-	.priv = (void *)&(struct sst_ids) { .task_id = 0, .location_id = 0 }		\
+	.priv = (void *)&(struct sst_ids) { .ssp = &wssp_cfg, }				\
 }
 
-#define SST_OUTPUT(wname, wevent)							\
+#define SST_SSP_OUTPUT(wname, wevent, wssp_cfg)						\
 {	.id = snd_soc_dapm_output, .name = wname, .sname = NULL,			\
 	.reg = SND_SOC_NOPM, .shift = 0, .invert = 0,					\
 	.event = wevent, .event_flags = SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD,	\
-	.priv = (void *)&(struct sst_ids) { .task_id = 0, .location_id = 0 }		\
-}
-
-#define SST_DAPM_OUTPUT(wname, wloc_id, wtask_id, wformat, wevent)                      \
-{	.id = snd_soc_dapm_output, .name = wname, .sname = NULL,                        \
-	.reg = SND_SOC_NOPM, .shift = 0, .invert = 0,                                   \
-	.event = wevent, .event_flags = SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD,   \
-	.priv = (void *)&(struct sst_ids) { .location_id = wloc_id, .task_id = wtask_id,\
-						.pcm_fmt = wformat, }			\
+	.priv = (void *)&(struct sst_ids) { .ssp = &wssp_cfg, }				\
 }
 
 #define SST_PATH(wname, wtask, wloc_id, wevent, wflags)					\
@@ -126,14 +115,6 @@ struct sst_ids {
 	.invert = 0, .kcontrol_news = NULL, .num_kcontrols = 0,				\
 	.event = wevent, .event_flags = wflags,						\
 	.priv = (void *)&(struct sst_ids) { .task_id = wtask, .location_id = wloc_id, }	\
-}
-
-#define SST_LINKED_PATH(wname, wtask, wloc_id, linked_wname, wevent, wflags)		\
-{	.id = snd_soc_dapm_pga, .name = wname, .reg = SND_SOC_NOPM, .shift = 0,		\
-	.invert = 0, .kcontrol_news = NULL, .num_kcontrols = 0,				\
-	.event = wevent, .event_flags = wflags,						\
-	.priv = (void *)&(struct sst_ids) { .task_id = wtask, .location_id = wloc_id,	\
-					.parent_wname = linked_wname}			\
 }
 
 #define SST_PATH_MEDIA_LOOP(wname, wtask, wloc_id, wformat, wevent, wflags)             \
@@ -148,16 +129,8 @@ struct sst_ids {
 #define SST_PATH_INPUT(name, task_id, loc_id, event)					\
 	SST_PATH(name, task_id, loc_id, event, SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD)
 
-#define SST_PATH_LINKED_INPUT(name, task_id, loc_id, linked_wname, event)		\
-	SST_LINKED_PATH(name, task_id, loc_id, linked_wname, event,			\
-					SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD)
-
 #define SST_PATH_OUTPUT(name, task_id, loc_id, event)					\
 	SST_PATH(name, task_id, loc_id, event, SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD)
-
-#define SST_PATH_LINKED_OUTPUT(name, task_id, loc_id, linked_wname, event)		\
-	SST_LINKED_PATH(name, task_id, loc_id, linked_wname, event,			\
-					SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD)
 
 #define SST_PATH_MEDIA_LOOP_OUTPUT(name, task_id, loc_id, format, event)		\
 	SST_PATH_MEDIA_LOOP(name, task_id, loc_id, format, event, SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD)
@@ -278,79 +251,61 @@ struct sst_algo_control {
 	int max;
 	u16 module_id;
 	u16 pipe_id;
+	u16 instance_id;
 	u16 task_id;
 	u16 cmd_id;
 	bool bypass;
 	unsigned char *params;
+	char pname[44];
 	struct snd_soc_dapm_widget *w;
 };
 
-/* size of the control = size of params + size of length field */
-#define SST_ALGO_CTL_VALUE(xcount, xtype, xpipe, xmod, xtask, xcmd)			\
-	(struct sst_algo_control){							\
-		.max = xcount + sizeof(u16), .type = xtype, .module_id = xmod,			\
-		.pipe_id = xpipe, .task_id = xtask, .cmd_id = xcmd,			\
-	}
+#define SST_ALGO_KCONTROL_BYTES(xpname, xmname, xcount, xmod, \
+				xpipe, xinstance, xtask, xcmd) \
+{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,\
+	.name = SST_CONTROL_NAME(xpname, xmname, xinstance, "params"), \
+	.info = sst_algo_bytes_ctl_info, \
+	.get = sst_algo_control_get, .put = sst_algo_control_set, \
+	.private_value = (unsigned long)&(struct sst_algo_control) \
+	{.max = xcount, .type = SST_ALGO_PARAMS, .module_id = xmod, .pname = xpname, \
+	.pipe_id = xpipe, .instance_id = xinstance, .task_id = xtask, .cmd_id = xcmd} }
 
-#define SST_ALGO_KCONTROL(xname, xcount, xmod, xpipe,					\
-			  xtask, xcmd, xtype, xinfo, xget, xput)			\
-{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,						\
-	.name =  xname,									\
-	.info = xinfo, .get = xget, .put = xput,					\
-	.private_value = (unsigned long)&						\
-			SST_ALGO_CTL_VALUE(xcount, xtype, xpipe,			\
-					   xmod, xtask, xcmd),				\
-}
+#define SST_ALGO_KCONTROL_BOOL(xpname, xmname, xmod, xpipe, xinstance, xtask) \
+{      .iface = SNDRV_CTL_ELEM_IFACE_MIXER, \
+	.name = SST_CONTROL_NAME(xpname, xmname, xinstance, "bypass"), \
+	.info = snd_soc_info_bool_ext, \
+	.get = sst_algo_control_get, .put = sst_algo_control_set, \
+	.private_value = (unsigned long)&(struct sst_algo_control) \
+	{.type = SST_ALGO_BYPASS, .module_id = xmod, .pipe_id = xpipe, .pname = xpname, \
+	.task_id = xtask, .instance_id = xinstance, .bypass = 0 } }
 
-#define SST_ALGO_KCONTROL_BYTES(xpname, xmname, xcount, xmod,				\
-				xpipe, xinstance, xtask, xcmd)				\
-	SST_ALGO_KCONTROL(SST_CONTROL_NAME(xpname, xmname, xinstance, "params"),	\
-			  xcount, xmod, xpipe, xtask, xcmd, SST_ALGO_PARAMS,		\
-			  sst_algo_bytes_ctl_info,					\
-			  sst_algo_control_get, sst_algo_control_set)
-
-#define SST_ALGO_KCONTROL_BOOL(xpname, xmname, xmod, xpipe, xinstance, xtask)		\
-	SST_ALGO_KCONTROL(SST_CONTROL_NAME(xpname, xmname, xinstance, "bypass"),	\
-			  0, xmod, xpipe, xtask, 0, SST_ALGO_BYPASS,			\
-			  snd_soc_info_bool_ext,					\
-			  sst_algo_control_get, sst_algo_control_set)
-
-#define SST_ALGO_BYPASS_PARAMS(xpname, xmname, xcount, xmod, xpipe,			\
-				xinstance, xtask, xcmd)					\
-	SST_ALGO_KCONTROL_BOOL(xpname, xmname, xmod, xpipe, xinstance, xtask),		\
+#define SST_ALGO_BYPASS_PARAMS(xpname, xmname, xcount, xmod, xpipe, \
+				xinstance, xtask, xcmd)  \
+	SST_ALGO_KCONTROL_BOOL(xpname, xmname, xmod, xpipe, xinstance, xtask), \
 	SST_ALGO_KCONTROL_BYTES(xpname, xmname, xcount, xmod, xpipe, xinstance, xtask, xcmd)
 
-#define SST_COMBO_ALGO_KCONTROL_BYTES(xpname, xmname, xsubmod, xcount, xmod,		\
-				      xpipe, xinstance, xtask, xcmd)			\
-	SST_ALGO_KCONTROL(SST_COMBO_CONTROL_NAME(xpname, xmname, xinstance, "params",	\
-						 xsubmod),				\
-			  xcount, xmod, xpipe, xtask, xcmd, SST_ALGO_PARAMS,		\
-			  sst_algo_bytes_ctl_info,					\
-			  sst_algo_control_get, sst_algo_control_set)
+#define SST_COMBO_ALGO_KCONTROL_BYTES(xpname, xmname, xsubmod, xcount, xmod, \
+				      xpipe, xinstance, xtask, xcmd) \
+{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER,\
+	.name = SST_COMBO_CONTROL_NAME(xpname, xmname, xinstance, "params", xsubmod), \
+	.info = sst_algo_bytes_ctl_info, \
+	.get = sst_algo_control_get, .put = sst_algo_control_set, \
+	.private_value = (unsigned long)&(struct sst_algo_control) \
+	{.max = xcount, .type = SST_ALGO_PARAMS, .module_id = xmod, .pname = xpname, \
+	.pipe_id = xpipe, .instance_id = xinstance, .task_id = xtask, .cmd_id = xcmd} }
 
-
-struct sst_enum {
-	bool tx;
-	unsigned short reg;
-	unsigned int max;
-	const char * const *texts;
-	struct snd_soc_dapm_widget *w;
-};
 
 /* only 4 slots/channels supported atm */
 #define SST_SSP_SLOT_ENUM(s_ch_no, is_tx, xtexts) \
-	(struct sst_enum){ .reg = s_ch_no, .tx = is_tx, .max = 4+1, .texts = xtexts, }
+	(struct soc_enum){ .reg = s_ch_no, .reg2 = is_tx, .max = 4+1, .texts = xtexts, }
 
 #define SST_SLOT_CTL_NAME(xpname, xmname, s_ch_name) \
 	xpname " " xmname " " s_ch_name
 
 #define SST_SSP_SLOT_CTL(xpname, xmname, s_ch_name, s_ch_no, is_tx, xtexts, xget, xput) \
-{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, \
-	.name = SST_SLOT_CTL_NAME(xpname, xmname, s_ch_name), \
-	.info = sst_slot_enum_info, \
-	.get = xget, .put = xput, \
-	.private_value = (unsigned long)&SST_SSP_SLOT_ENUM(s_ch_no, is_tx, xtexts), \
-}
+	SOC_DAPM_ENUM_EXT(SST_SLOT_CTL_NAME(xpname, xmname, s_ch_name), \
+			  SST_SSP_SLOT_ENUM(s_ch_no, is_tx, xtexts), \
+			  xget, xput)
 
 #define SST_MUX_CTL_NAME(xpname, xinstance) \
 	xpname " " #xinstance

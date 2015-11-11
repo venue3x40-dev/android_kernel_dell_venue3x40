@@ -95,8 +95,6 @@ static bool disp_a_power_up(struct drm_device *dev,
 
 	PSB_DEBUG_PM("Power on island %x, returned %d\n", p_island->island, ret);
 
-	/* FIXME: Can we move dpst out of ospm code? */
-	psb_dpst_diet_restore(dev);
 	return !ret;
 }
 
@@ -110,7 +108,6 @@ static bool disp_a_power_down(struct drm_device *dev,
 {
 	bool ret;
 
-	psb_dpst_diet_save(dev);
 #ifndef USE_GFX_INTERNAL_PM_FUNC
 	ret = pmu_nc_set_power_state(PMU_DISP_A, OSPM_ISLAND_DOWN, DSP_SS_PM);
 #else

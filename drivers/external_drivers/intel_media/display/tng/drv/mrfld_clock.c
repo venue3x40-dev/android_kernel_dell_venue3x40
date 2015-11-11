@@ -195,6 +195,8 @@ static bool
 mrfld_find_best_PLL(struct drm_device *dev, int pipe, int target, int refclk,
 		    struct mrst_clock_t *best_clock)
 {
+	DRM_DRIVER_PRIVATE_T *dev_priv = dev->dev_private;
+	struct mdfld_dsi_config *dsi_config = NULL;
 	struct mrst_clock_t clock;
 	const struct mrst_limit_t *limit = mrfld_limit(dev, pipe);
 	int err = target;
@@ -210,6 +212,10 @@ mrfld_find_best_PLL(struct drm_device *dev, int pipe, int target, int refclk,
 	    ("target = %d, m_min = %d, m_max = %d, p_min = %d, p_max = %d. \n",
 	     target, limit->m.min, limit->m.max, limit->p1.min, limit->p1.max);
 
+	if (pipe == 0)
+		dsi_config = dev_priv->dsi_configs[0];
+	target /= dsi_config->lane_count;
+
 	for (clock.m = limit->m.min; clock.m <= limit->m.max; clock.m++) {
 		for (clock.p1 = limit->p1.min; clock.p1 <= limit->p1.max;
 		     clock.p1++) {
@@ -224,7 +230,7 @@ mrfld_find_best_PLL(struct drm_device *dev, int pipe, int target, int refclk,
 			}
 		}
 	}
-	PSB_DEBUG_ENTRY("mdfldFindBestPLL target = %d,"
+	PSB_DEBUG_WARN("mdfldFindBestPLL target = %d,"
 			"m = %d, p = %d. \n", target, best_clock->m,
 			best_clock->p1);
 	PSB_DEBUG_ENTRY("mdfldFindBestPLL err = %d.\n", err);
@@ -326,54 +332,59 @@ void mrfld_setup_pll(struct drm_device *dev, int pipe, int clk)
 
 	ok = mrfld_find_best_PLL(dev, pipe, clk_tmp, refclk, &clock);
 	dev_priv->tmds_clock_khz = clock.dot / (clk_n * clk_p2 * clk_byte);
-
+	if((get_panel_type(dev, pipe) == CPT_7INCH)) {
+		clock.p1 = 7;
+		clk_n = 1;
+		clock.m = 148;
+	}
+	if((get_panel_type(dev, pipe) == AUO_7INCH)) {
+		clock.p1 = 7;
+		clk_n = 1;
+		clock.m = 153;
+	}
+#if 0
 	/*
 	 * FIXME: Hard code the divisors' value for JDI panel, and need to
 	 * calculate them according to the DSI PLL HAS spec.
 	 */
 	if (pipe != 1) {
-		switch(get_panel_type(dev, pipe)) {
-		case SDC_16x25_CMD:
-				clock.p1 = 3;
-				clock.m = 126;
-				break;
-		case SHARP_10x19_CMD:
-				clock.p1 = 3;
-				clock.m = 137;
-				break;
-		case SHARP_10x19_DUAL_CMD:
-				clock.p1 = 3;
-				clock.m = 125;
-				break;
-		case CMI_7x12_CMD:
+		if (is_panel_vid_or_cmd(dev) == MDFLD_DSI_ENCODER_DBI) {
+			if (get_panel_type(dev, pipe) == JDI_7x12_CMD) {
 				clock.p1 = 4;
-				clock.m = 120;
-				break;
-		case SDC_25x16_CMD:
-		case JDI_25x16_CMD:
-		case SHARP_25x16_CMD:
-				clock.p1 = 3;
-				clock.m = 138;
-				break;
-		case SHARP_25x16_VID:
-		case JDI_25x16_VID:
-				clock.p1 = 3;
-				clock.m = 162;
-				break;
-		case JDI_7x12_VID:
-				clock.p1 = 5;
 				clk_n = 1;
-				clock.m = 144;
-				break;
-		default:
-			/* for JDI_7x12_CMD */
-				clock.p1 = 4;
 				clock.m = 142;
-				break;
+			} else if ((get_panel_type(dev, pipe) == SHARP_10x19_CMD) ||
+				(get_panel_type(dev, pipe) == SHARP_25x16_CMD))
+			{
+				clock.p1 = 3;
+				clk_n = 1;
+				clock.m = 137;
+			} else {
+				clock.p1 = 4;
+				clk_n = 1;
+				clock.m = 120;
+			}
+		}if (is_panel_vid_or_cmd(dev) == MDFLD_DSI_ENCODER_DPI){
+			if((get_panel_type(dev, pipe) == AUO_1920_VID)||(get_panel_type(dev, pipe) == INO_12x192_8INCH_VID)){
+				clock.p1 = 3;
+				clk_n = 1;
+				clock.m = 146;
+			} else{
+				clock.p1 = 7;//5;
+				clk_n = 1;
+				clock.m = 148;//130;
+			}
+		} else if (is_dual_dsi(dev)) {
+			clock.p1 = 2;
+			clk_n = 1;
+			clock.m = 104;
+		} else {
+			clock.p1 = 5;
+			clk_n = 1;
+			clock.m = 130;
 		}
-		clk_n = 1;
 	}
-
+#endif
 	if (!ok) {
 		DRM_ERROR("mdfldFindBestPLL fail in mrfld_crtc_mode_set.\n");
 	} else {
@@ -387,6 +398,11 @@ void mrfld_setup_pll(struct drm_device *dev, int pipe, int clk)
 	/* Write the N1 & M1 parameters into DSI_PLL_DIV_REG */
 	fp = (clk_n / 2) << 16;
 	fp |= m_conv;
+	/*TODO:vcheeram - Remove the hardcoding of fp for JDI_7x12_CMD panel
+	 * on ANN for fp.
+	 */
+	if (IS_ANN_A0(dev) && dsi_config != NULL && (get_panel_type(dev, dsi_config->pipe) == JDI_7x12_CMD))
+		fp = 0x177;
 
 	if (is_mipi) {
 		/* Enable DSI PLL clocks for DSI0 rather than CCK. */
@@ -498,9 +514,6 @@ void enable_HFPLL(struct drm_device *dev)
 			intel_mid_msgbus_write32(CCK_PORT, DSI_PLL_CTRL_REG,
 					pll_select | _DSI_CCK_PLL_SELECT);
 			ctrl_reg5 |= (1 << 7) | 0xF;
-
-			if (get_panel_type(dev, 0) == SHARP_10x19_CMD)
-				ctrl_reg5 = 0x1f87;
 			intel_mid_msgbus_write32(CCK_PORT,
 					FUSE_OVERRIDE_FREQ_CNTRL_REG5,
 					ctrl_reg5);
@@ -522,20 +535,10 @@ bool enable_DSIPLL(struct drm_device *dev)
 		goto err_out;
 	ctx = &dsi_config->dsi_hw_context;
 
-	if (IS_ANN(dev)) {
-		int dspfreq;
-
-		if ((get_panel_type(dev, 0) == JDI_7x12_CMD) ||
-			(get_panel_type(dev, 0) == JDI_7x12_VID))
-			dspfreq = DISPLAY_FREQ_FOR_200;
-		else
-			dspfreq = DISPLAY_FREQ_FOR_333;
-
+	/*TODO: vcheeram : Remove the hardcoding of the register*/
+	if (is_dual_dsi(dev))
 		intel_mid_msgbus_write32(CCK_PORT,
-			FUSE_OVERRIDE_FREQ_CNTRL_REG5,
-			CKESC_GATE_EN | CKDP1X_GATE_EN | DISPLAY_FRE_EN
-			| dspfreq);
-	}
+			FUSE_OVERRIDE_FREQ_CNTRL_REG5, 0x682);
 
 	/* Prepare DSI  PLL register before enabling */
 	intel_mid_msgbus_write32(CCK_PORT, DSI_PLL_DIV_REG, 0);

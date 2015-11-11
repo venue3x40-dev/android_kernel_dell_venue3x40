@@ -593,12 +593,6 @@ static int create_fwinit_command(struct sep_drvdata *drvdata,
 	int i;
 	int rc;
 
-	/* For klocwork, add extra check */
-	if (qs_num > SEP_MAX_NUM_OF_DESC_Q) {
-		pr_err("Max number of desc queues (%d) exceeded (%d)\n");
-		return -EINVAL;
-	}
-
 	/* allocate coherent working buffer */
 	*fw_init_params_buf_pp = dma_alloc_coherent(drvdata->dev,
 						    FW_INIT_PARAMS_BUF_LEN,

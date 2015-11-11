@@ -23,6 +23,7 @@
 #include <linux/pci.h>
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
+#include <linux/mdm_ctrl_switcher.h>
 
 #include "ehci.h"
 #include "pci-quirks.h"
@@ -314,6 +315,10 @@ static int ehci_pci_setup(struct usb_hcd *hcd)
 			pm_runtime_set_active(&pdev->dev);
 #endif
 		} else if (pdev->device == 0x119D) {
+#ifdef MDM_CTRL_SWITCH_OFF
+			pci_set_power_state(pdev,PCI_D3cold);
+            return -ENODEV;
+#endif
 			ehci_info(ehci, "Detected HSIC HC\n");
 			hcd->has_tt = 1;
 			ehci->has_hostpc = 1;
@@ -581,16 +586,18 @@ static int ehci_pci_suspend(struct usb_hcd *hcd, bool do_wakeup)
 			struct pci_dev  *pdev =
 				to_pci_dev(hcd->self.controller);
 
-			hostpc_reg = &ehci->regs->hostpc[port];
-			temp = ehci_readl(ehci, hostpc_reg);
+			if (pdev->device != 0x119D) {
+				hostpc_reg = &ehci->regs->hostpc[port];
+				temp = ehci_readl(ehci, hostpc_reg);
 
-			if (!(temp & HOSTPC_PHCD))
-				ehci_writel(ehci, temp | HOSTPC_PHCD,
-						hostpc_reg);
-			temp = ehci_readl(ehci, hostpc_reg);
-			ehci_dbg(ehci, "Port %d PHY low-power mode %s\n",
-				port, (temp & HOSTPC_PHCD) ?
-					"succeeded" : "failed");
+				if (!(temp & HOSTPC_PHCD))
+					ehci_writel(ehci, temp | HOSTPC_PHCD,
+							hostpc_reg);
+				temp = ehci_readl(ehci, hostpc_reg);
+				ehci_dbg(ehci, "Port %d PHY low-power mode %s\n",
+					port, (temp & HOSTPC_PHCD) ?
+						"succeeded" : "failed");
+			}
 		}
 		spin_unlock_irqrestore(&ehci->lock, flags);
 	}

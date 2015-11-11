@@ -110,7 +110,7 @@ static int compat_sep_ioctl_sym_cipher_init(struct file *filp, unsigned int cmd,
 	if (__get_user(init_32.error_info, &init_params->error_info))
 		return -EFAULT;
 
-	if (put_user(init_32.error_info,
+	if (__put_user(init_32.error_info,
 		       &((struct sym_cipher_init_params_32 *)arg)->error_info))
 		return -EFAULT;
 
@@ -151,7 +151,7 @@ static int compat_sep_ioctl_auth_enc_init(struct file *filp, unsigned int cmd,
 	if (__get_user(up32.error_info, &init_params->error_info))
 		return -EFAULT;
 
-	if (put_user(up32.error_info,
+	if (__put_user(up32.error_info,
 		       &((struct auth_enc_init_params_32 *)arg)->error_info))
 		return -EFAULT;
 
@@ -192,7 +192,7 @@ static int compat_sep_ioctl_mac_init(struct file *filp, unsigned int cmd,
 	if (__get_user(up32.error_info, &init_params->error_info))
 		return -EFAULT;
 
-	if (put_user(up32.error_info,
+	if (__put_user(up32.error_info,
 		       &((struct mac_init_params_32 *)arg)->error_info))
 		return -EFAULT;
 
@@ -232,7 +232,7 @@ static int compat_sep_ioctl_hash_init(struct file *filp, unsigned int cmd,
 	if (__get_user(up32.error_info, &init_params->error_info))
 		return -EFAULT;
 
-	if (put_user(up32.error_info,
+	if (__put_user(up32.error_info,
 		       &((struct hash_init_params_32 *)arg)->error_info))
 		return -EFAULT;
 
@@ -280,7 +280,7 @@ static int compat_sep_ioctl_proc_dblk(struct file *filp, unsigned int cmd,
 	if (__get_user(up32.error_info, &dblk_params->error_info))
 		return -EFAULT;
 
-	if (put_user(up32.error_info,
+	if (__put_user(up32.error_info,
 		       &((struct process_dblk_params_32 *)arg)->error_info))
 		return -EFAULT;
 
@@ -368,7 +368,7 @@ static int compat_sep_ioctl_combined_init(struct file *filp, unsigned int cmd,
 	if (__get_user(up32.error_info, &init_params->error_info))
 		return -EFAULT;
 
-	if (put_user(up32.error_info,
+	if (__put_user(up32.error_info,
 		       &((struct combined_init_params_32 *)arg)->error_info))
 		return -EFAULT;
 
@@ -415,7 +415,7 @@ static int compat_sep_ioctl_combined_proc_dblk(struct file *filp,
 	if (__get_user(up32.error_info, &blk_params->error_info))
 		return -EFAULT;
 
-	if (put_user(up32.error_info,
+	if (__put_user(up32.error_info,
 		       &((struct combined_proc_dblk_params_32 *)arg)->error_info))
 		return -EFAULT;
 
@@ -522,7 +522,7 @@ static int compat_sep_ioctl_sym_cipher_proc(struct file *filp, unsigned int cmd,
 	if (__get_user(up32.error_info, &user_params->error_info))
 		return -EFAULT;
 
-	if (put_user(up32.error_info,
+	if (__put_user(up32.error_info,
 		       &((struct sym_cipher_proc_params_32 *)arg)->error_info))
 		return -EFAULT;
 
@@ -724,7 +724,7 @@ static int compat_sep_ioctl_sep_rpc(struct file *filp, unsigned int cmd,
 	if (__get_user(up32.error_info, &user_params->error_info))
 		return -EFAULT;
 
-	if (put_user(up32.error_info,
+	if (__put_user(up32.error_info,
 		       &((struct sep_rpc_params_32 *)arg)->error_info))
 		return -EFAULT;
 

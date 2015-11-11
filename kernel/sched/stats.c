@@ -3,6 +3,7 @@
 #include <linux/fs.h>
 #include <linux/seq_file.h>
 #include <linux/proc_fs.h>
+#include <linux/cpufreq.h>
 
 #include "sched.h"
 
@@ -137,9 +138,61 @@ static const struct file_operations proc_schedstat_operations = {
 	.release = seq_release,
 };
 
+#ifdef CONFIG_CPU_SHIELDING
+static int show_shield_stat(struct seq_file *seq, void *v)
+{
+	int i;
+	u64 avg_residency[2], total_time;
+
+	total_time =
+		ktime_to_ms(ktime_sub(ktime_get(), shield_info.ktime_offset));
+
+	for (i = 0; i < NR_MODULES; i++) {
+		avg_residency[i] =
+			ktime_to_ms(shield_info.info[i].module_residency) * 100;
+		do_div(avg_residency[i], total_time);
+	}
+
+	for (i = 0; i < NR_MODULES; i++) {
+		seq_printf(seq, "shield stat[%d]: %u\t",
+			i, shield_info.info[i].shield_stat);
+		seq_printf(seq, "unshield stat[%d]: %u\t\n",
+			i, shield_info.info[i].unshield_stat);
+	}
+
+	seq_printf(seq, "nr_module_shielded: %u\n\n",
+			shield_info.nr_module_shielded);
+	seq_printf(seq, "shield mask: 0x%X\n\n", *(shield_info.shield_mask));
+
+	for (i = 0; i < NR_MODULES; i++) {
+		seq_printf(seq, "module_%d_utilization: %u\n",
+				i, get_module_utilization(i));
+		seq_printf(seq, "Module[%d] shielding residency: %2.2llu%\n",
+				i, avg_residency[i]);
+	}
+	return 0;
+}
+
+
+static int shield_stat_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, show_shield_stat, NULL);
+}
+
+static const struct file_operations proc_shield_stat_operations = {
+	.open    = shield_stat_open,
+	.read    = seq_read,
+	.llseek  = seq_lseek,
+	.release = seq_release,
+};
+#endif
+
 static int __init proc_schedstat_init(void)
 {
 	proc_create("schedstat", 0, NULL, &proc_schedstat_operations);
+#ifdef CONFIG_CPU_SHIELDING
+	proc_create("shield_stat", 0444, NULL, &proc_shield_stat_operations);
+#endif
 	return 0;
 }
 module_init(proc_schedstat_init);

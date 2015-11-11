@@ -133,7 +133,9 @@ static inline int get_ps_int_property(struct power_supply *psy,
 #define switch_cable(psy, new_cable) \
 		set_ps_int_property(psy,\
 				POWER_SUPPLY_PROP_CABLE_TYPE, new_cable)
-
+//MD: add for getting batt level
+#define CAP(psy) \
+		get_ps_int_property(psy, POWER_SUPPLY_PROP_CAPACITY)
 #define HEALTH(psy) \
 		get_ps_int_property(psy, POWER_SUPPLY_PROP_HEALTH)
 #define CV(psy) \

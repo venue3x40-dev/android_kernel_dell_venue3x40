@@ -137,13 +137,10 @@ struct usb_phy *usb_get_phy(enum usb_phy_type type)
 
 	get_device(phy->dev);
 
-	spin_unlock_irqrestore(&phy_lock, flags);
-
-	return phy;
 err0:
 	spin_unlock_irqrestore(&phy_lock, flags);
 
-	return NULL;
+	return phy;
 }
 EXPORT_SYMBOL_GPL(usb_get_phy);
 

@@ -40,6 +40,7 @@
 #endif
 #include <linux/synaptics_i2c_rmi4.h>
 #include <linux/early_suspend_sysfs.h>
+#include "synaptics_i2c_rmi4.h"
 
 /* TODO: for multiple device support will need a per-device mutex */
 #define DRIVER_NAME "rmi4_ts"
@@ -90,17 +91,6 @@ static int boot_mode;
 module_param(boot_mode, uint, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(param, "The boot mode of system");
 
-#ifdef CONFIG_DEBUG_FS
-#define F54_FIFO_DATA_OFFSET 3
-#include <linux/debugfs.h>
-
-static struct dentry *rmi4_debugfs_root;
-static char *retbuf;
-#define RAW_VALUE_SIZE 2
-#endif
-
-#include "synaptics_i2c_rmi4.h"
-
 /*
 #define REPORT_2D_Z
 */
@@ -123,15 +113,6 @@ static struct rmi4_fn_ops supported_fn_ops[] = {
 		.irq_handler = rmi4_touchpad_irq_handler,
 		.remove = rmi4_touchpad_remove,
 	},
-#ifdef CONFIG_DEBUG_FS
-	{
-		.fn_number = RMI4_ANALOG_FUNC_NUM,
-		.detect  = rmi4_ana_data_detect,
-		.config = NULL,
-		.irq_handler = rmi4_ana_data_irq_handler,
-		.remove = rmi4_ana_data_remove,
-	},
-#endif
 	{
 		.fn_number = RMI4_TOUCHPAD_F12_FUNC_NUM,
 		.detect = rmi4_touchpad_f12_detect,
@@ -146,12 +127,13 @@ static struct rmi4_fn_ops supported_fn_ops[] = {
 		.irq_handler = rmi4_button_irq_handler,
 		.remove = rmi4_button_remove,
 	},
+#ifdef DEBUG
+	{
+		.fn_number = RMI4_ANALOG_FUNC_NUM,
+	},
 	{
 		.fn_number = RMI4_DEV_CTL_FUNC_NUM,
-		.detect = rmi4_dev_ctl_detect,
-		.irq_handler = rmi4_dev_ctl_irq_handler,
 	},
-#ifdef DEBUG
 	{
 		.fn_number = RMI4_FLASH_FW_FUNC_NUM,
 	}
@@ -559,35 +541,6 @@ int rmi4_button_irq_handler(struct rmi4_data *pdata, struct rmi4_fn *rfi)
 	return retval;
 }
 
-#ifdef CONFIG_DEBUG_FS
-int rmi4_ana_data_irq_handler(struct rmi4_data *pdata, struct rmi4_fn *rfi)
-{
-	int retval = 0;
-	struct rmi4_ana_data *ana_data = rfi->fn_data;
-	struct i2c_client *client = pdata->i2c_client;
-
-	if (!ana_data->buffer) {
-		dev_warn(&client->dev, "Raw sensor buffer not yet ready !\n");
-		return -ENOMEM;
-	}
-
-	retval = rmi4_i2c_block_read(pdata,
-			rfi->data_base_addr + F54_FIFO_DATA_OFFSET,
-			ana_data->buffer, ana_data->size);
-	if (retval < 0) {
-		dev_err(&client->dev, "%s: read data error!\n", __func__);
-		ana_data->status = retval;
-		return retval;
-	}
-	dev_info(&client->dev, "%s: ana buffer %p, size=%d, retval=%d\n",
-		__func__, ana_data->buffer, ana_data->size, retval);
-
-	ana_data->status = retval;
-
-	return 0;
-}
-#endif
-
 static irqreturn_t rmi4_irq_thread(int irq, void *data)
 {
 	u8 intr_status[4];
@@ -625,32 +578,6 @@ static irqreturn_t rmi4_irq_thread(int irq, void *data)
 			rfi->ops->irq_handler(pdata, rfi);
 	}
 	return IRQ_HANDLED;
-}
-
-int rmi4_dev_ctl_detect(struct rmi4_data *pdata, struct rmi4_fn *rfi,
-						unsigned int interruptcount)
-{
-	unsigned short	intr_offset;
-	int	i;
-	struct	i2c_client *client = pdata->i2c_client;
-
-	dev_info(&client->dev, "%s\n", __func__);
-
-	/* Need to get interrupt info for handling interrupts */
-	rfi->index_to_intr_reg = (interruptcount + 7)/8;
-	if (rfi->index_to_intr_reg != 0)
-		rfi->index_to_intr_reg -= 1;
-	/*
-	 * loop through interrupts for each source in fn $01
-	 * and or in a bit to the interrupt mask for each.
-	 */
-	intr_offset = interruptcount % 8;
-	rfi->intr_mask = 0;
-	for (i = intr_offset;
-		i < ((rfi->intr_src_count & MASK_3BIT) + intr_offset); i++)
-		rfi->intr_mask |= 1 << i;
-
-	return 0;
 }
 
 /**
@@ -941,14 +868,6 @@ int rmi4_touchpad_f12_detect(struct rmi4_data *pdata, struct rmi4_fn *rfi,
 			pdata->sensor_max_x,
 			pdata->sensor_max_y);
 
-#ifdef CONFIG_DEBUG_FS
-	pdata->num_rx = ctrl_8.num_of_rx;
-	pdata->num_tx = ctrl_8.num_of_tx;
-	dev_info(&pdata->i2c_client->dev,
-		"%s: Function %02x rx = %d tx = %d\n",
-		__func__, rfi->fn_number, ctrl_8.num_of_rx, ctrl_8.num_of_tx);
-#endif
-
 	/* Need to get interrupt info for handling interrupts */
 	rfi->index_to_intr_reg = (interruptcount + 7)/8;
 	if (rfi->index_to_intr_reg != 0)
@@ -1048,61 +967,6 @@ alloc_status_err:
 	kfree(button_data);
 	return retval;
 }
-
-#ifdef CONFIG_DEBUG_FS
-int rmi4_ana_data_detect(struct rmi4_data *pdata, struct rmi4_fn *rfi,
-			 unsigned int interruptcount)
-{
-	int i;
-	unsigned short intr_offset;
-	struct rmi4_ana_data *ana_data;
-	struct i2c_client *client = pdata->i2c_client;
-
-	rfi->index_to_intr_reg = (interruptcount + 7) / 8;
-	if (rfi->index_to_intr_reg != 0)
-		rfi->index_to_intr_reg -= 1;
-	/*
-	 * loop through interrupts for each source
-	 * and or in a bit to the interrupt mask for each.
-	 */
-	intr_offset = interruptcount % 8;
-	rfi->intr_mask = 0;
-	for (i = intr_offset;
-		i < ((rfi->intr_src_count & MASK_3BIT) + intr_offset); i++)
-		rfi->intr_mask |= 1 << i;
-
-	ana_data = kzalloc(sizeof(*ana_data), GFP_KERNEL);
-	if (!ana_data) {
-		dev_err(&client->dev, "kzalloc ana data failed\n");
-		return -ENOMEM;
-	}
-	ana_data->i2c_client = client;
-	rfi->fn_data = ana_data;
-	/* touch + button area rx/tx */
-	ana_data->rx = pdata->num_rx;
-	ana_data->tx = pdata->num_tx;
-
-	/* Report type = 3 Raw 15-bit Image report
-	 * Each pixel's raw capacitance is represented by 16-bit signed value.
-	 * The number of bytes reported is:
-	 * NumberofTransmitterElectrodes * NumberofReceiverElectrodes * 2
-	 */
-	ana_data->size = RAW_VALUE_SIZE * ana_data->rx * ana_data->tx;
-
-	return 0;
-}
-
-void rmi4_ana_data_remove(struct rmi4_fn *rfi)
-{
-	struct rmi4_ana_data *ana_data;
-
-	if (!rfi->fn_data)
-		return;
-
-	ana_data = rfi->fn_data;
-	kfree(ana_data);
-}
-#endif
 
 void rmi4_button_remove(struct rmi4_fn *rfi)
 {
@@ -1586,71 +1450,6 @@ failed:
 	return retval;
 }
 
-static int do_sw_reset(struct rmi4_data *pdata)
-{
-	int	retval = 0;
-	struct rmi4_fn *rfi;
-	struct list_head *fn_list;
-	struct i2c_client *client = pdata->i2c_client;
-
-	fn_list = &(pdata->rmi4_mod_info.support_fn_list);
-	list_for_each_entry(rfi, fn_list, link) {
-		if (rfi->ops->fn_number == RMI4_DEV_CTL_FUNC_NUM) {
-			u16 addr = rfi->cmd_base_addr;
-			u8 cmd = RMI4_DEVICE_RESET_CMD;
-			dev_info(&client->dev, "%s: reset\n", __func__);
-			retval = rmi4_i2c_byte_write(pdata, addr, cmd);
-			if (retval < 0) {
-				dev_err(&client->dev, "reset cmd failed.\n");
-				return retval;
-			}
-			msleep(RMI4_RESET_DELAY);
-		}
-	}
-
-	return 0;
-}
-
-int rmi4_dev_ctl_irq_handler(struct rmi4_data *pdata, struct rmi4_fn *rfi)
-{
-	/* number of touch points - fingers down in this case */
-	int retval;
-	u16 data_base_addr;
-	u8 data;
-	struct i2c_client *client = pdata->i2c_client;
-
-	dev_info(&client->dev, "%s\n", __func__);
-
-	data_base_addr = rfi->data_base_addr;
-
-	retval = rmi4_i2c_block_read(pdata, data_base_addr,
-					&data, 1);
-	if (retval != 1) {
-		dev_err(&client->dev, "%s:read touch registers failed\n",
-								__func__);
-		return retval;
-	}
-
-	/* Check device status & act upon */
-	if ((data & 0x0F)) {
-		dev_info(&client->dev, "%s: reset & init!\n", __func__);
-		/* reset & init */
-		retval = do_sw_reset(pdata);
-		if (retval) {
-			dev_err(&client->dev, "%s: Soft reset failed!\n",
-					__func__);
-			return retval;
-		}
-		retval = rmi4_i2c_query_device(pdata);
-		if (retval) {
-			dev_err(&client->dev, "rmi4 query device failed\n");
-			return retval;
-		}
-	}
-
-	return 0;
-}
-
 static int rmi4_config_gpio(struct rmi4_data *pdata)
 {
 	int ret, int_gpio, rst_gpio;
@@ -1744,7 +1543,7 @@ static ssize_t attr_ctrl_reg_get(struct device *dev,
 	}
 	return -EINVAL;
 }
-static DEVICE_ATTR(ctrl_reg, S_IRUSR | S_IWUSR,
+static DEVICE_ATTR(ctrl_reg, S_IRUGO | S_IWUSR,
 		attr_ctrl_reg_get, attr_ctrl_reg_set);
 
 static ssize_t attr_query_reg_set(struct device *dev,
@@ -1788,7 +1587,7 @@ static ssize_t attr_query_reg_get(struct device *dev,
 	}
 	return -EINVAL;
 }
-static DEVICE_ATTR(query_reg, S_IRUSR | S_IWUSR,
+static DEVICE_ATTR(query_reg, S_IRUGO | S_IWUSR,
 		attr_query_reg_get, attr_query_reg_set);
 
 static ssize_t attr_data_reg_set(struct device *dev,
@@ -1832,7 +1631,7 @@ static ssize_t attr_data_reg_get(struct device *dev,
 	}
 	return -EINVAL;
 }
-static DEVICE_ATTR(data_reg, S_IRUSR | S_IWUSR,
+static DEVICE_ATTR(data_reg, S_IRUGO | S_IWUSR,
 		attr_data_reg_get, attr_data_reg_set);
 
 static ssize_t attr_reg_addr_set(struct device *dev,
@@ -1856,7 +1655,7 @@ static ssize_t attr_reg_addr_get(struct device *dev,
 	return sprintf(buf, "%d(0x%x)\n",
 			rmi4_data->dbg_reg_addr, rmi4_data->dbg_reg_addr);
 }
-static DEVICE_ATTR(reg_addr, S_IRUSR | S_IWUSR,
+static DEVICE_ATTR(reg_addr, S_IRUGO | S_IWUSR,
 			attr_reg_addr_get, attr_reg_addr_set);
 
 static ssize_t attr_fn_num_set(struct device *dev,
@@ -1879,7 +1678,7 @@ static ssize_t attr_fn_num_get(struct device *dev,
 
 	return sprintf(buf, "0x%x\n", rmi4_data->dbg_fn_num);
 }
-static DEVICE_ATTR(fn_num, S_IRUSR | S_IWUSR,
+static DEVICE_ATTR(fn_num, S_IRUGO | S_IWUSR,
 		attr_fn_num_get, attr_fn_num_set);
 
 static ssize_t attr_reg_set(struct device *dev,
@@ -1903,7 +1702,7 @@ static ssize_t attr_reg_get(struct device *dev,
 	rmi4_i2c_byte_read(rmi4_data, rmi4_data->dbg_reg_addr, &val);
 	return sprintf(buf, "%d(0x%x)\n", val, val);
 }
-static DEVICE_ATTR(reg, S_IRUSR | S_IWUSR, attr_reg_get, attr_reg_set);
+static DEVICE_ATTR(reg, S_IRUGO | S_IWUSR, attr_reg_get, attr_reg_set);
 
 static struct attribute *rmi4_attrs[] = {
 	&dev_attr_ctrl_reg.attr,
@@ -1930,10 +1729,6 @@ void rmi4_suspend(struct rmi4_data *pdata)
 	dev_info(&client->dev, "Enter %s, touch counter=%ld, key counter=%ld",
 			__func__, pdata->touch_counter, pdata->key_counter);
 	disable_irq(pdata->irq);
-
-	rmi4_i2c_byte_read(pdata, pdata->fn01_ctrl_base_addr,
-			&pdata->fn01_ctrl_reg_saved);
-
 	retval = rmi4_i2c_set_bits(pdata,
 			pdata->fn01_ctrl_base_addr, F01_CTRL0_SLEEP);
 	if (retval < 0)
@@ -1976,8 +1771,17 @@ void rmi4_resume(struct rmi4_data *pdata)
 			msleep(50);
 	}
 	enable_irq(pdata->irq);
-	rmi4_i2c_byte_write(pdata, pdata->fn01_ctrl_base_addr,
-			pdata->fn01_ctrl_reg_saved);
+retry:
+	retval = rmi4_i2c_clear_bits(pdata,
+			pdata->fn01_ctrl_base_addr, F01_CTRL0_SLEEP);
+	if (retval < 0) {
+		dev_err(&client->dev,
+				"clear F01_CTRL0_SLEEP failed, try=%d\n", try);
+		if (++try < MAX_RETRY_COUNT) {
+			msleep(10);
+			goto retry;
+		}
+	}
 
 	/* Clear interrupts */
 	rmi4_i2c_block_read(pdata,
@@ -1999,250 +1803,6 @@ static ssize_t early_suspend_store(struct device *dev,
 }
 
 static DEVICE_EARLY_SUSPEND_ATTR(early_suspend_store);
-
-#ifdef CONFIG_DEBUG_FS
-static struct rmi4_fn *find_ana_rfi(struct rmi4_data *pdata)
-{
-	struct rmi4_fn *rfi;
-	struct device *dev = &pdata->i2c_client->dev;
-
-	list_for_each_entry(rfi, &pdata->rmi4_mod_info.support_fn_list, link)
-		if (rfi->fn_number == RMI4_ANALOG_FUNC_NUM)
-			break;
-	if (!rfi || rfi->fn_number != RMI4_ANALOG_FUNC_NUM) {
-		dev_err(dev, "%s: rfi not found !\n", __func__);
-		rfi = NULL;
-	}
-
-	return rfi;
-}
-
-static int rmi4_debugfs_raw_sensor_data_show(struct seq_file *seq, void *unused)
-{
-	return 0;
-}
-
-static int rmi4_debugfs_raw_sensor_data_open(struct inode *inode,
-		struct file *file)
-{
-	return single_open(file, rmi4_debugfs_raw_sensor_data_show,
-			inode->i_private);
-}
-
-#define  rmi4_debugfs_error_check(dev, ret, addr, size)					\
-do {												\
-	if (ret < 0) {										\
-		dev_err(dev, "%s: Could not write data to 0x%x\n",				\
-				__func__, addr);						\
-		return ret;									\
-	}											\
-	dev_err(dev, "%s: Unexpected number written to 0x%x; Wrote: %d\t Expected: %d\n",	\
-			__func__, addr, ret, (int)size);					\
-	return -EIO;										\
-} while (0)
-
-static ssize_t rmi4_debugfs_raw_sensor_data_read(struct file *file,
-			char __user *buf, size_t count, loff_t *ppos)
-{
-	struct seq_file *seq;
-	struct rmi4_data *rmi4_data;
-	struct rmi4_fn *rfi;
-	struct rmi4_ana_data *ana_data;
-	struct device *dev;
-	unsigned char tx, rx;
-	unsigned short pixel;
-	int rst_gpio, ret, i;
-	size_t size;
-
-	seq = (struct seq_file *)file->private_data;
-	if (!seq) {
-		pr_err("rmi4_ts: Failed to get seq_file\n");
-		return -EFAULT;
-	}
-
-	rmi4_data = (struct rmi4_data *)seq->private;
-	if (!rmi4_data) {
-		pr_err("rmi4_ts: Failed to get private data\n");
-		return -EFAULT;
-	}
-
-	rfi = find_ana_rfi(rmi4_data);
-
-	if (!rfi) {
-		pr_err("rmi4_ts: Failed to get F54 rmi4 function\n");
-		return -EFAULT;
-	}
-
-	ana_data = rfi->fn_data;
-
-	dev = &rmi4_data->i2c_client->dev;
-
-	if (ana_data->status == 0) {
-
-		/* Reset using GPIO to get fresh data */
-		rst_gpio = rmi4_data->board->rst_gpio_number;
-
-		gpio_set_value(rst_gpio, 0);
-		msleep(RMI4_RESET_DELAY);
-		gpio_set_value(rst_gpio, 1);
-		/* Longer delay is needed here */
-		msleep(RMI4_RESET_DELAY * 6);
-
-		ana_data->buffer = kzalloc(ana_data->size, GFP_KERNEL);
-
-		if (!ana_data->buffer) {
-			dev_err(dev, "%s Failed to create buffer for sensor",
-					__func__);
-			ret = -ENOMEM;
-			goto dbgfs_exit;
-		}
-
-		/* Supports only Report type 3 (Raw 16-bit Image report) as of now */
-		ana_data->reporttype = F54_RAW_16BIT_IMAGE;
-
-		/* Set the Report Type 3 in the first block DATA registers F54_AD_Data0 */
-
-		dev_dbg(dev, "%s: Writing 0x%x: 0x%x\n", __func__, rfi->data_base_addr,
-					ana_data->reporttype);
-		ret = rmi4_i2c_byte_write(rmi4_data, rfi->data_base_addr,
-						ana_data->reporttype);
-		if (ret != 2)
-			rmi4_debugfs_error_check(dev, ret, rfi->data_base_addr,
-					sizeof(ana_data->reporttype));
-
-		/* Fn $54 command GET_REPORT */
-		ana_data->cmd = GET_REPORT;
-
-		/* Write the command to the command register */
-		dev_dbg(dev, "%s; Writing 0x%x: 0x%x\n", __func__,
-			rfi->cmd_base_addr, ana_data->cmd);
-		ret = rmi4_i2c_byte_write(rmi4_data, rfi->cmd_base_addr,
-					ana_data->cmd);
-		if (ret != 2)
-			rmi4_debugfs_error_check(dev, ret, rfi->cmd_base_addr, count);
-
-		ana_data->status = -EAGAIN;
-		ret = -EAGAIN;
-
-	} else if (ana_data->status == -EAGAIN) {
-
-		ret = -EAGAIN;
-
-	} else if (ana_data->status == ana_data->size) {
-
-		ret = 0;
-		if (*ppos > 0) {
-			ana_data->status = 0;
-			goto dbgfs_exit;
-		}
-
-		/* Create a buffer to hold the readable form of data. It
-		* consists of an array of numbers in hexadecimal format.
-		* Each row represents the number of receivers and each
-		* column represents the number of transmitters. Size of
-		* each value is entirely depended on the hardware. In this
-		* specific case it is 16 bits
-		* i.e  0x07df 0x7df ...
-		*      ... ... ...
-		*      ... ...
-		* size = (2 + RAW_VALUE_SIZE * 2 + 2) * Tx * RX + TX
-		*/
-		size = 2 + RAW_VALUE_SIZE * 2 + 2;
-		size *=	ana_data->tx * ana_data->rx;
-		size += ana_data->tx;
-		retbuf = kzalloc(size, GFP_KERNEL);
-
-		if (!retbuf) {
-			dev_err(dev, "%s: Failed to create return buffer\n",
-				__func__);
-			ret = -ENOMEM;
-			kfree(ana_data->buffer);
-			goto dbgfs_exit;
-		}
-
-		size = 0;
-		i = 0;
-
-		/* Processing raw binary data to readable form */
-		for (tx = 0; tx < ana_data->tx; tx++) {
-			for (rx = 0; rx < ana_data->rx; rx++) {
-				pixel = 0;
-				pixel = 0xff & ana_data->buffer[i++];
-				pixel = (ana_data->buffer[i++] << 8) | pixel;
-				size += sprintf(retbuf + size, "0x%04x  ", pixel);
-			}
-			size += sprintf(retbuf + size, "\n");
-		}
-
-		if (copy_to_user(buf, retbuf, size)) {
-			dev_err(dev, "%s: copy_to_user failed\n",
-				__func__);
-			ret = -EFAULT;
-		}
-
-		kfree(ana_data->buffer);
-		kfree(retbuf);
-		retbuf = NULL;
-		ana_data->buffer = NULL;
-
-		if (ret < 0)
-			goto dbgfs_exit;
-
-		*ppos = *ppos + size;
-		ret = size;
-	} else {
-		ret = -EFAULT;
-	}
-
-dbgfs_exit:
-	return ret;
-
-}
-
-static const struct file_operations rmi4_debugfs_raw_senor_data_fops = {
-	.owner			= THIS_MODULE,
-	.open			= rmi4_debugfs_raw_sensor_data_open,
-	.read			= rmi4_debugfs_raw_sensor_data_read,
-	.release		= single_release,
-};
-
-static void rmi4_debugfs_remove(void)
-{
-	debugfs_remove_recursive(rmi4_debugfs_root);
-}
-
-static int rmi4_debugfs_create(struct rmi4_data *rmi4_data)
-{
-	struct dentry *entry;
-	struct rmi4_fn *rfi = find_ana_rfi(rmi4_data);
-
-	if (!rfi)
-		return -EFAULT;
-
-	rmi4_debugfs_root = debugfs_create_dir(DRIVER_NAME, NULL);
-	if (!rmi4_debugfs_root) {
-		dev_warn(&rmi4_data->i2c_client->dev,
-			"%s: debugfs_create_dir failed\n", DRIVER_NAME);
-		return -ENOMEM;
-	} else {
-		entry = debugfs_create_file("raw_sensor_data",
-				S_IRUGO | S_IWUSR, rmi4_debugfs_root,
-				(void *)rmi4_data,
-				&rmi4_debugfs_raw_senor_data_fops);
-
-		if (!entry)
-			goto err_dbgfs;
-
-		return 0;
-
-err_dbgfs:
-		dev_warn(&rmi4_data->i2c_client->dev,
-			"%s: Creating debugfs entries failed !\n", DRIVER_NAME);
-		rmi4_debugfs_remove();
-		return -ENOMEM;
-	}
-}
-#endif /* CONFIG_DEBUG_FS */
 
 /**
  * rmi4_probe() - Initialze the i2c-client touchscreen driver
@@ -2426,11 +1986,6 @@ static int rmi4_probe(struct i2c_client *client,
 
 	register_early_suspend_device(&client->dev);
 
-#ifdef CONFIG_DEBUG_FS
-	if (rmi4_debugfs_create(rmi4_data))
-		dev_warn(&client->dev, "%s: Debugfs support failed !\n", DRIVER_NAME);
-#endif
-
 	return retval;
 
 #ifdef DEBUG
@@ -2486,9 +2041,6 @@ static int rmi4_remove(struct i2c_client *client)
 
 #ifdef DEBUG
 	sysfs_remove_group(&client->dev.kobj, &rmi4_attr_dbg);
-#endif
-#ifdef CONFIG_DEBUG_FS
-	rmi4_debugfs_remove();
 #endif
 	input_unregister_device(rmi4_data->input_ts_dev);
 	input_unregister_device(rmi4_data->input_key_dev);

@@ -31,7 +31,7 @@ extern int is_tng_a0;
 
 struct gpu_freq_thresholds a_governor_profile[] = {
 			/* low, high thresholds for Performance profile */
-			{67, 85},
+			{25, 45},
 			/* low, high thresholds for Power Save profile*/
 			{80, 95},
 			/* low, high Custom thresholds */

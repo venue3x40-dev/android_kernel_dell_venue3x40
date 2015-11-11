@@ -496,17 +496,25 @@ int __media_entity_setup_link(struct media_link *link, u32 flags)
 
 	mdev = source->parent;
 
-	if (mdev->link_notify) {
-		ret = mdev->link_notify(link, flags,
-					MEDIA_DEV_NOTIFY_PRE_LINK_CH);
+	if ((flags & MEDIA_LNK_FL_ENABLED) && mdev->link_notify) {
+		ret = mdev->link_notify(link->source, link->sink,
+					MEDIA_LNK_FL_ENABLED);
 		if (ret < 0)
 			return ret;
 	}
 
 	ret = __media_entity_setup_link_notify(link, flags);
+	if (ret < 0)
+		goto err;
 
-	if (mdev->link_notify)
-		mdev->link_notify(link, flags, MEDIA_DEV_NOTIFY_POST_LINK_CH);
+	if (!(flags & MEDIA_LNK_FL_ENABLED) && mdev->link_notify)
+		mdev->link_notify(link->source, link->sink, 0);
+
+	return 0;
+
+err:
+	if ((flags & MEDIA_LNK_FL_ENABLED) && mdev->link_notify)
+		mdev->link_notify(link->source, link->sink, 0);
 
 	return ret;
 }

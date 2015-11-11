@@ -1369,16 +1369,6 @@ PVRSRV_ERROR RGXSetupFirmware(PVRSRV_DEVICE_NODE	*psDeviceNode,
 		goto failFWIfGpuUtilFWCbCtlMemDescAqCpuVirt;
 	}
 
-       /* Reset FW CB of GPU state transitions history */
-       /* Setting ui32LastGpuUtilState to idle lets the very first host power-on
-        * entry in the FW CB to be recorded as an idle state rather than a reserved one
-        * (which would be discarded by RGXGetGpuUtilStats() but we might need it) */
-       psDevInfo->psRGXFWIfGpuUtilFWCb->ui32LastGpuUtilState = RGXFWIF_GPU_UTIL_FWCB_STATE_IDLE;
-       psDevInfo->psRGXFWIfGpuUtilFWCb->ui32WriteOffset = 0;
-       psDevInfo->psRGXFWIfGpuUtilFWCb->ui32CurrentDVFSId = 0;
-       psDevInfo->psRGXFWIfGpuUtilFWCb->aui64CB[0] = RGXFWIF_GPU_UTIL_FWCB_RESERVED;
-       psDevInfo->psRGXFWIfGpuUtilFWCb->aui64CB[RGXFWIF_GPU_UTIL_FWCB_SIZE-1] = RGXFWIF_GPU_UTIL_FWCB_RESERVED;
-
 #if defined(SUPPORT_USER_REGISTER_CONFIGURATION)
 	PDUMPCOMMENT("Allocate rgxfw register configuration structure");
 	eError = DevmemFwAllocate(psDevInfo,
@@ -2413,11 +2403,8 @@ static IMG_VOID _RGXScheduleProcessQueuesMISR(IMG_VOID *pvData)
 		RGXFWIF_GPU_UTIL_FWCB  *psUtilFWCb = psDevInfo->psRGXFWIfGpuUtilFWCb;
 		IMG_UINT64             ui64FWCbEntryCurrent;
 		IMG_BOOL               bGPUHasWorkWaiting;
-		IMG_UINT32             ui32WriteOffset;
 
-               ui32WriteOffset = (psUtilFWCb->ui32WriteOffset == 0)? (RGXFWIF_GPU_UTIL_FWCB_SIZE-1):(psUtilFWCb->ui32WriteOffset-1);
-               ui64FWCbEntryCurrent = psUtilFWCb->aui64CB[ui32WriteOffset];
-
+		ui64FWCbEntryCurrent = psUtilFWCb->aui64CB[(psUtilFWCb->ui32WriteOffset - 1) & RGXFWIF_GPU_UTIL_FWCB_MASK];
 		bGPUHasWorkWaiting = (RGXFWIF_GPU_UTIL_FWCB_ENTRY_STATE(ui64FWCbEntryCurrent) == RGXFWIF_GPU_UTIL_FWCB_STATE_BLOCKED);
 
 		if (!bGPUHasWorkWaiting)

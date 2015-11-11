@@ -54,24 +54,6 @@ enum {
 	MDM_TIMER_DEFAULT
 };
 
-/* Supported Modem IDs*/
-enum mdm_ctrl_mdm_type {
-	MODEM_UNSUP,
-	MODEM_6260,
-	MODEM_6268,
-	MODEM_6360,
-	MODEM_7160,
-	MODEM_7260
-};
-
-/* Type of modem board */
-enum mdm_ctrl_board_type {
-	BOARD_UNSUP,
-	BOARD_AOB,
-	BOARD_NGFF,
-	BOARD_PCIE,
-};
-
 /**
  * struct mdm_ctrl_cmd - Command parameters
  *
@@ -98,8 +80,6 @@ struct mdm_ctrl_cmd {
 #define MDM_CTRL_GET_HANGUP_REASONS	_IO(MDM_CTRL_MAGIC, 8)
 #define MDM_CTRL_CLEAR_HANGUP_REASONS	_IO(MDM_CTRL_MAGIC, 9)
 #define MDM_CTRL_SET_POLLED_STATES	_IO(MDM_CTRL_MAGIC, 10)
-#define MDM_CTRL_SET_BOARD		_IO(MDM_CTRL_MAGIC, 11)
-#define MDM_CTRL_SET_MDM		_IO(MDM_CTRL_MAGIC, 12)
 
 #endif /* _MDM_CTRL_H */
 

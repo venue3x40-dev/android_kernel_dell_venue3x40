@@ -42,6 +42,9 @@
 #include <linux/security.h>
 #include <linux/notifier.h>
 #include <linux/profile.h>
+#include <linux/cpuidle.h>
+#include <linux/cpufreq.h>
+#include <linux/cpumask.h>
 #include <linux/freezer.h>
 #include <linux/vmalloc.h>
 #include <linux/blkdev.h>
@@ -88,6 +91,149 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched.h>
+
+#ifdef CONFIG_CPU_SHIELDING
+
+static DEFINE_SPINLOCK(shield_lock);
+static DEFINE_PER_CPU(unsigned int, shield_index);
+struct cpu_shield_info shield_info;
+unsigned int sysctl_shield_low_wm;
+unsigned int sysctl_shield_high_wm;
+unsigned int sysctl_shield_enable;
+unsigned int sysctl_shield_rate;
+
+bool is_this_cpu_shielded(int cpu)
+{
+	if (!sysctl_shield_enable)
+		return false;
+	return cpumask_test_cpu(cpu, shield_info.shield_mask);
+}
+
+int get_module_utilization(int module)
+{
+	int cpu_util_stat = 0, cpu;
+
+	for_each_module_cpus(cpu, module)
+		cpu_util_stat += per_cpu(cpu_shield_data, cpu).cpu_utilization;
+
+	return cpu_util_stat;
+}
+
+static void shield_this_module(int module)
+{
+	unsigned long flags;
+	int cpu;
+
+	spin_lock_irqsave(&shield_lock, flags);
+
+	if (shield_info.nr_module_shielded >= MAX_SHIELD_LEVEL)
+		goto unlock;
+
+	shield_info.info[module].ktime_entry = ktime_get();
+
+	for_each_module_cpus(cpu, module)
+		cpumask_set_cpu(cpu, shield_info.shield_mask);
+
+	shield_info.info[module].shield_stat += 1;
+	shield_info.nr_module_shielded++;
+
+unlock:
+	spin_unlock_irqrestore(&shield_lock, flags);
+}
+
+static void unshield_this_module(int module)
+{
+	unsigned long flags;
+	int cpu;
+	ktime_t temp;
+
+	spin_lock_irqsave(&shield_lock, flags);
+	if (!shield_info.nr_module_shielded)
+		goto unlock;
+
+	for_each_module_cpus(cpu, module)
+		cpumask_clear_cpu(cpu, shield_info.shield_mask);
+
+	shield_info.nr_module_shielded--;
+
+	temp = ktime_sub(ktime_get(), shield_info.info[module].ktime_entry);
+	shield_info.info[module].module_residency =
+		ktime_add(shield_info.info[module].module_residency, temp);
+
+	shield_info.info[module].unshield_stat += 1;
+unlock:
+	spin_unlock_irqrestore(&shield_lock, flags);
+}
+
+static void do_shield_check(void)
+{
+	unsigned int curr_load, prev_load = UINT_MAX;
+	unsigned  int mod_shield = 0;
+	int module, mod_count = 0;
+	int cpu = smp_processor_id();
+
+	if (!sysctl_shield_enable)
+		return;
+
+	if (shield_info.nr_module_shielded >= MAX_SHIELD_LEVEL)
+		return;
+
+	if (per_cpu(cpu_shield_data, cpu).is_not_valid)
+		return;
+
+	for (module = 0; module < NR_MODULES; module++) {
+		curr_load = get_module_utilization(module);
+		if (curr_load < prev_load)
+			mod_shield = module;
+
+		if (curr_load < sysctl_shield_low_wm * NR_ML_CPUS)
+			mod_count++;
+
+		prev_load = curr_load;
+	}
+
+	if (mod_count == NR_MODULES) {
+		for (module = 1; module < NR_MODULES; module++)
+			shield_this_module(module);
+	}
+}
+
+static void do_unshield_check(void)
+{
+	int module;
+	int cpu = smp_processor_id();
+	unsigned int curr_load;
+	bool unshield = false;
+
+	if (!shield_info.nr_module_shielded)
+		return;
+
+	if (per_cpu(cpu_shield_data, cpu).is_not_valid) {
+		unshield = true;
+		goto un_shield;
+	}
+
+	for (module = 0; module < NR_MODULES; module++) {
+		if (!cpumask_test_cpu(module * 2, shield_info.shield_mask)) {
+			curr_load = get_module_utilization(module);
+			if (curr_load > sysctl_shield_high_wm * NR_ML_CPUS)
+				unshield = true;
+
+			continue;
+		}
+
+	}
+
+un_shield:
+	if (unshield) {
+		for (module = 1; module < NR_MODULES; module++)
+			unshield_this_module(module);
+	}
+}
+
+#else /* !CONFIG_CPU_SHIELDING */
+bool is_this_cpu_shielded(int cpu) { return false; }
+#endif /* CONFIG_CPU_SHIELDING */
 
 void start_bandwidth_timer(struct hrtimer *period_timer, ktime_t period)
 {
@@ -767,7 +913,6 @@ static void enqueue_task(struct rq *rq, struct task_struct *p, int flags)
 	update_rq_clock(rq);
 	sched_info_queued(p);
 	p->sched_class->enqueue_task(rq, p, flags);
-	update_cpu_concurrency(rq);
 }
 
 static void dequeue_task(struct rq *rq, struct task_struct *p, int flags)
@@ -775,7 +920,6 @@ static void dequeue_task(struct rq *rq, struct task_struct *p, int flags)
 	update_rq_clock(rq);
 	sched_info_dequeued(p);
 	p->sched_class->dequeue_task(rq, p, flags);
-	update_cpu_concurrency(rq);
 }
 
 void activate_task(struct rq *rq, struct task_struct *p, int flags)
@@ -2742,7 +2886,19 @@ void scheduler_tick(void)
 	raw_spin_lock(&rq->lock);
 	update_rq_clock(rq);
 	update_cpu_load_active(rq);
-	update_cpu_concurrency(rq);
+
+#ifdef CONFIG_CPU_SHIELDING
+
+	if (sysctl_shield_rate &&
+		 !(per_cpu(shield_index, cpu) % sysctl_shield_rate)) {
+		if (shield_info.nr_module_shielded)
+			do_unshield_check();
+		else
+			do_shield_check();
+	}
+	per_cpu(shield_index, cpu)++;
+#endif
+
 	curr->sched_class->task_tick(rq, curr, 0);
 	raw_spin_unlock(&rq->lock);
 
@@ -2750,6 +2906,8 @@ void scheduler_tick(void)
 
 #ifdef CONFIG_SMP
 	rq->idle_balance = idle_cpu(cpu);
+	if (is_this_cpu_shielded(cpu))
+		return;
 	trigger_load_balance(rq, cpu);
 #endif
 	rq_last_tick_reset(rq);
@@ -5069,11 +5227,7 @@ set_table_entry(struct ctl_table *entry,
 static struct ctl_table *
 sd_alloc_ctl_domain_table(struct sched_domain *sd)
 {
-#ifdef CONFIG_WORKLOAD_CONSOLIDATION
-	struct ctl_table *table = sd_alloc_ctl_entry(14);
-#else
 	struct ctl_table *table = sd_alloc_ctl_entry(13);
-#endif
 
 	if (table == NULL)
 		return NULL;
@@ -5103,13 +5257,7 @@ sd_alloc_ctl_domain_table(struct sched_domain *sd)
 		sizeof(int), 0644, proc_dointvec_minmax, false);
 	set_table_entry(&table[11], "name", sd->name,
 		CORENAME_MAX_SIZE, 0444, proc_dostring, false);
-#ifdef CONFIG_WORKLOAD_CONSOLIDATION
-	set_table_entry(&table[12], "asym_concurrency", &sd->asym_concurrency,
-		sizeof(int), 0644, proc_dointvec, false);
-	/* &table[13] is terminator */
-#else
 	/* &table[12] is terminator */
-#endif
 
 	return table;
 }
@@ -5684,32 +5832,6 @@ static void update_top_cache_domain(int cpu)
 	per_cpu(sd_llc_id, cpu) = id;
 }
 
-#ifdef CONFIG_WORKLOAD_CONSOLIDATION
-static void update_domain_extra_info(struct sched_domain *sd)
-{
-	while (sd) {
-		int i = 0, j = 0, first, min = INT_MAX;
-		struct sched_group *group;
-
-		group = sd->groups;
-		first = group_first_cpu(group);
-		do {
-			int k = group_first_cpu(group);
-			i += 1;
-			if (k < first)
-				j += 1;
-			if (k < min) {
-				sd->first_group = group;
-				min = k;
-			}
-		} while (group = group->next, group != sd->groups);
-
-		sd->total_groups = i;
-		sd->group_number = j;
-		sd = sd->parent;
-	}
-}
-#endif
 /*
  * Attach the domain 'sd' to 'cpu' as its base domain. Callers must
  * hold the hotplug lock.
@@ -5751,10 +5873,6 @@ cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 	destroy_sched_domains(tmp, cpu);
 
 	update_top_cache_domain(cpu);
-
-#ifdef CONFIG_WORKLOAD_CONSOLIDATION
-	update_domain_extra_info(sd);
-#endif
 }
 
 /* cpus with isolated domains */
@@ -6836,6 +6954,26 @@ match2:
 
 static int num_cpus_frozen;	/* used to mark begin/end of suspend/resume */
 
+#ifdef CONFIG_CPU_SHIELDING
+int sched_core_shielding_init(void)
+{
+	int err = 0, size;
+
+	size = NR_MODULES * sizeof(struct module_info);
+	shield_info.info = kzalloc(size, GFP_KERNEL);
+	shield_info.nr_module_shielded = 0;
+	shield_info.ktime_offset = ktime_get();
+
+	/* set thresholds for shielding */
+	sysctl_shield_low_wm = SHIELD_LWM_THRESH;
+	sysctl_shield_high_wm = SHIELD_HWM_THRESH;
+	sysctl_shield_rate = 2;
+	sysctl_shield_enable = 1;
+
+	return err;
+}
+#endif
+
 /*
  * Update cpusets according to cpu_active mask.  If cpusets are
  * disabled, cpuset_update_active_cpus() becomes a simple wrapper
@@ -6930,6 +7068,10 @@ void __init sched_init_smp(void)
 	free_cpumask_var(non_isolated_cpus);
 
 	init_sched_rt_class();
+#ifdef CONFIG_CPU_SHIELDING
+	sched_core_shielding_init();
+#endif /* CONFIG_CPU_SHIELDING */
+
 }
 #else
 void __init sched_init_smp(void)
@@ -7091,11 +7233,6 @@ void __init sched_init(void)
 #endif
 		init_rq_hrtick(rq);
 		atomic_set(&rq->nr_iowait, 0);
-
-		/*
-		 * cpu concurrency init
-		 */
-		init_cpu_concurrency(rq);
 	}
 
 	set_load_weight(&init_task);

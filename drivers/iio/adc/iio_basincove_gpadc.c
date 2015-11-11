@@ -63,8 +63,6 @@ struct gpadc_info {
 	int channel_num;
 	struct gpadc_regmap_t *gpadc_regmaps;
 	struct gpadc_regs_t *gpadc_regs;
-	u8 pmic_id;
-	bool is_pmic_provisioned;
 };
 
 static inline int gpadc_clear_bits(u16 addr, u8 mask)
@@ -159,22 +157,13 @@ int iio_basincove_gpadc_sample(struct iio_dev *indio_dev,
 				int ch, struct gpadc_result *res)
 {
 	struct gpadc_info *info = iio_priv(indio_dev);
-	int i, ret, reg_val;
+	int i, ret;
 	u8 tmp, th, tl;
-	u8 mask, cursrc;
-	unsigned long rlsb;
-	unsigned long rlsb_array[] = {
-		0, 260420, 130210, 65100, 32550, 16280,
-		8140, 4070, 2030, 0, 260420, 130210};
-
+	u8 mask;
 	struct gpadc_regs_t *regs = info->gpadc_regs;
-	bool pmic_a0 = false;
 
 	if (!info->initialized)
 		return -ENODEV;
-
-	pmic_a0 = ((info->pmic_id & PMIC_MAJOR_REV_MASK) == PMIC_MAJOR_REV_A0)
-		&& ((info->pmic_id & PMIC_MINOR_REV_MASK) == PMIC_MINOR_REV_X0);
 
 	mutex_lock(&info->lock);
 
@@ -213,48 +202,7 @@ int iio_basincove_gpadc_sample(struct iio_dev *indio_dev,
 		if (ch & (1 << i)) {
 			gpadc_read(info->gpadc_regmaps[i].rsltl, &tl);
 			gpadc_read(info->gpadc_regmaps[i].rslth, &th);
-
-			reg_val = ((th & 0xF) << 8) + tl;
-
-			if ((info->pmic_id & PMIC_VENDOR_ID_MASK)
-					== SHADYCOVE_VENDORID) {
-				switch (i) {
-				case PMIC_GPADC_CHANNEL_VBUS:
-				case PMIC_GPADC_CHANNEL_PMICTEMP:
-				case PMIC_GPADC_CHANNEL_PEAK:
-				case PMIC_GPADC_CHANNEL_AGND:
-				case PMIC_GPADC_CHANNEL_VREF:
-					/* Auto mode not applicable */
-					res->data[i] = reg_val;
-					break;
-				case PMIC_GPADC_CHANNEL_BATID:
-				case PMIC_GPADC_CHANNEL_BATTEMP0:
-				case PMIC_GPADC_CHANNEL_BATTEMP1:
-				case PMIC_GPADC_CHANNEL_SYSTEMP0:
-				case PMIC_GPADC_CHANNEL_SYSTEMP1:
-				case PMIC_GPADC_CHANNEL_SYSTEMP2:
-					if (pmic_a0 &&
-						!info->is_pmic_provisioned) {
-						/* Auto mode with Scaling 4
-						 * for non-provisioned A0 */
-						rlsb = 32550;
-						res->data[i] =
-							(reg_val * rlsb)/10000;
-						break;
-					}
-				/* Case fall-through for PMIC-A1 onwards.
-				 * For USBID, Auto-mode-without-scaling always
-				 */
-				case PMIC_GPADC_CHANNEL_USBID:
-					/* Auto mode without Scaling */
-					cursrc = (th & 0xF0) >> 4;
-					rlsb = rlsb_array[cursrc];
-					res->data[i] = (reg_val * rlsb)/10000;
-					break;
-				}
-			} else {
-				res->data[i] = reg_val;
-			}
+			res->data[i] = ((th & 0xF) << 8) + tl;
 		}
 	}
 
@@ -334,9 +282,7 @@ static ssize_t intel_basincove_gpadc_show_result(struct device *dev,
 
 	for (i = 0; i < info->channel_num; i++) {
 		used += snprintf(buf + used, PAGE_SIZE - used,
-				"sample_result[%s] = %x\n",
-				info->gpadc_regmaps[i].name,
-				sample_result.data[i]);
+			 "sample_result[%d] = %d\n", i, sample_result.data[i]);
 	}
 
 	return used;
@@ -426,7 +372,6 @@ static const struct iio_info basincove_adc_info = {
 static int bcove_gpadc_probe(struct platform_device *pdev)
 {
 	int err;
-	u8 pmic_prov;
 	struct gpadc_info *info;
 	struct iio_dev *indio_dev;
 	struct intel_basincove_gpadc_platform_data *pdata =
@@ -487,30 +432,6 @@ static int bcove_gpadc_probe(struct platform_device *pdev)
 	err = iio_device_register(indio_dev);
 	if (err < 0)
 		goto err_array_unregister;
-
-	err = gpadc_read(PMIC_ID_ADDR, &info->pmic_id);
-	if (err) {
-		dev_err(&pdev->dev, "Error reading PMIC ID register\n");
-		goto err_iio_device_unregister;
-	}
-
-	dev_info(&pdev->dev, "PMIC-ID: %x\n", info->pmic_id);
-	if ((info->pmic_id & PMIC_VENDOR_ID_MASK) == SHADYCOVE_VENDORID) {
-		/* Check if PMIC is provisioned */
-		err = gpadc_read(PMIC_SPARE03_ADDR, &pmic_prov);
-		if (err) {
-			dev_err(&pdev->dev,
-					"Error reading PMIC SPARE03 REG\n");
-			goto err_iio_device_unregister;
-		}
-
-		if ((pmic_prov & PMIC_PROV_MASK) == PMIC_PROVISIONED) {
-			dev_info(&pdev->dev, "ShadyCove PMIC provisioned\n");
-			info->is_pmic_provisioned = true;
-		} else
-			dev_info(info->dev,
-					"ShadyCove PMIC not provisioned\n");
-	}
 
 	err = sysfs_create_group(&pdev->dev.kobj,
 			&intel_basincove_gpadc_attr_group);

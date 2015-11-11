@@ -24,12 +24,10 @@
 /* Slave Address for all regulators */
 #define V2P85SCNT_ADDR	0x065
 #define V2P85SXCNT_ADDR	0x066
-#define V3P3SXCNT_ADDR	0x069
+#define V3P3SCNT_ADDR	0x069
 #define V1P8SCNT_ADDR	0x05c
 #define V1P8SXCNT_ADDR	0x05d
 #define VSYS_SCNT_ADDR	0x06c
-#define V1P0ACNT_ADDR	0x055
-#define V1P8ACNT_ADDR	0x05a
 
 #define CRYSTAL_COVE_REGULATOR_ID_START 1000
 
@@ -38,11 +36,9 @@ struct regulator_init_data;
 enum intel_regulator_id {
 	V2P85S = CRYSTAL_COVE_REGULATOR_ID_START,
 	V2P85SX,
-	V3P3SX,
+	V3P3S,
 	V1P8S,
 	V1P8SX,
-	V1P0A,
-	V1P8A,
 	VSYS_S,
 };
 
@@ -60,7 +56,7 @@ static const u16 V2P85SX_VSEL_TABLE[] = {
 	2900,
 };
 
-static const u16 V3P3SX_VSEL_TABLE[] = {
+static const u16 V3P3S_VSEL_TABLE[] = {
 	3332,
 };
 
@@ -74,14 +70,6 @@ static const u16 V1P8SX_VSEL_TABLE[] = {
 
 static const u16 VSYS_S_VSEL_TABLE[] = {
 	4200,
-};
-
-static const u16 V1P0A_VSEL_TABLE[] = {
-	900, 950, 1000, 1020, 1030, 1050, 1100,
-};
-
-static const u16 V1P8A_VSEL_TABLE[] = {
-	1620, 1710, 1800, 1836, 1854, 1890, 1980,
 };
 
 struct pmic_regulator_gpio_en {

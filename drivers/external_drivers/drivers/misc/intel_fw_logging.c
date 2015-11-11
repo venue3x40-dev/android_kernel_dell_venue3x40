@@ -40,9 +40,6 @@
 #include <linux/io.h>
 #include <asm/intel_scu_ipc.h>
 #include <asm/intel_scu_ipcutil.h>
-#ifdef CONFIG_TRACEPOINT_TO_EVENT
-#include <trace/events/tp2e.h>
-#endif
 
 #include "intel_fabricid_def.h"
 #include "intel_fw_trace.h"
@@ -120,12 +117,8 @@
 #define FABRIC_ERR_SIGNATURE_IDX1	1
 #define FABRIC_ERR_SCU_VERSIONINFO	2
 #define FABRIC_ERR_ERRORTYPE		3
-#define FABRIC_ERR_REGID0		4
-#define FABRIC_ERR_RECV_DUMP_START	5
-#define FABRIC_ERR_RECV_DUMP_LENGTH	6
-#define FABRIC_ERR_RECV_DUMP_START2	(FABRIC_ERR_RECV_DUMP_START + \
-					 FABRIC_ERR_RECV_DUMP_LENGTH)
 #define FABRIC_ERR_MAXIMUM_TXT		2048
+#define FABRIC_ERR_ERRORTYPE_MASK	0xFFFF
 
 /* Timeout in ms we wait SCU to generate dump on panic */
 #define SCU_PANIC_DUMP_TOUT		1
@@ -206,15 +199,6 @@ union error_scu_version {
 	u32 data;
 };
 
-union scu_error_type {
-	struct {
-		u32 postcode_err_type:16;
-		u32 protect_err_type:16;
-	} fields;
-	u32 data;
-};
-
-
 union reg_ids {
 	struct {
 		u32 reg_id0:8;
@@ -255,31 +239,15 @@ static u32 new_scu_trace_buffer_rb_size;
 static u32 new_sculog_offline_size;
 static u32 *new_sculog_offline_buf;
 
-static struct sculog_list {
+struct sculog_list {
 	struct list_head list;
 	char *data;
 	u32 size;
 	u32 curpos;
 } pending_sculog_list;
 
-/* Structure of the most important data of SCU Recoverable FE to save */
-static struct recovfe_list {
-	struct list_head list;
-	union error_header	header;
-	union error_scu_version	scuversion;
-	union scu_error_type	errortype;
-	union reg_ids		regid0;
-	u32			dumpDw1[FABRIC_ERR_RECV_DUMP_LENGTH];
-	u32			dumpDw2[FABRIC_ERR_RECV_DUMP_LENGTH];
-} pending_recovfe_list;
-
 static DEFINE_SPINLOCK(parsed_faberr_lock);
 static DEFINE_SPINLOCK(pending_list_lock);
-
-/* This lock protects the list of SCU Recoverable FE information, */
-/* stacked during the SCU Recoverable FE hard-irq, and unstacked  */
-/* during the interruptible thread (soft-irq) */
-static DEFINE_SPINLOCK(pending_recovfe_lock);
 
 static int scu_trace_irq;
 static int recoverable_irq;
@@ -912,19 +880,19 @@ static int parse_fab_err_log(
 	u32 fabric_id;
 	union error_header err_header;
 	union error_scu_version err_scu_ver;
-	union scu_error_type scu_err_type;
 	int error_type, cmd_type, init_id, is_multi, is_secondary;
 	u16 scu_minor_ver, scu_major_ver;
-	u32 reg_ids = 0;
+	u32 reg_ids = 0, error_typ = log_buffer[FABRIC_ERR_ERRORTYPE];
 	int i, need_new_regid, num_flag_status,
 		num_err_logs, offset, total;
 
 	err_header.data = log_buffer[FABRIC_ERR_HEADER];
 	err_scu_ver.data = log_buffer[FABRIC_ERR_SCU_VERSIONINFO];
-	scu_err_type.data = log_buffer[FABRIC_ERR_ERRORTYPE];
 
 	scu_minor_ver = err_scu_ver.fields.scu_rt_minor_ver;
 	scu_major_ver = err_scu_ver.fields.scu_rt_major_ver;
+
+	error_typ &= FABRIC_ERR_ERRORTYPE_MASK;
 
 	num_flag_status = err_header.fields.num_flag_regs;
 	num_err_logs = err_header.fields.num_err_regs;
@@ -976,12 +944,8 @@ static int parse_fab_err_log(
 		err_header.fields.num_of_recv_err);
 	fab_err_snprintf(
 		*parsed_fab_err_log, *parsed_fab_err_log_sz,
-		"Fabric error type: %s\n",
-		get_errortype_str(scu_err_type.fields.postcode_err_type));
-	fab_err_snprintf(
-		*parsed_fab_err_log, *parsed_fab_err_log_sz,
-		"Protection violation type: %s\n\n",
-		get_errortype_str(scu_err_type.fields.protect_err_type));
+		"Fabric error type: %s\n\n",
+		get_errortype_str(error_typ));
 	fab_err_snprintf(
 		*parsed_fab_err_log, *parsed_fab_err_log_sz,
 		"Summary of Fabric Error detail:\n");
@@ -1470,7 +1434,6 @@ static void dump_unsolicited_scutrace_ascii(char *data,
 static irqreturn_t recoverable_faberror_irq(int irq, void *ignored)
 {
 	struct sculog_list *new_sculog_struct = NULL;
-	struct recovfe_list *new_recovfe_struct = NULL;
 	u32 i, *tmp_unsolicit_sram_data = new_scu_trace_buffer + 1;
 	void *new_sculog_data = NULL;
 
@@ -1484,52 +1447,12 @@ static irqreturn_t recoverable_faberror_irq(int irq, void *ignored)
 
 	if (has_recoverable_fe) {
 		pr_err("A recoverable fabric error intr was captured!!!\n");
-
-		/* Updating /proc/ipanic_fab_recv_err */
 		spin_lock(&parsed_faberr_lock);
+
 		parsed_fab_err_length = parse_fab_err_log(&parsed_fab_err,
 							&parsed_fab_err_sz);
+
 		spin_unlock(&parsed_faberr_lock);
-
-		/* Stack of Recoverable events (hopefully only one!)    */
-		/* This is needed in case another hard-irq fires before */
-		/* the first soft-irq thread is finished.               */
-		new_recovfe_struct = kzalloc(sizeof(struct recovfe_list),
-					    GFP_ATOMIC);
-
-		if (!new_recovfe_struct) {
-			pr_err("Fail to allocate memory for "
-				"SCU recoverable fabric error copy\n");
-			return IRQ_HANDLED;
-		}
-		/* We take a snapshot of the buffer's characteristic DWords  */
-		/* in case the attached file becomes obsolete (when multiple */
-		/* IRQ occur in quick succession). That way, we can check    */
-		/* the file integrity and still have data if it fails        */
-		new_recovfe_struct->header.data =
-				log_buffer[FABRIC_ERR_HEADER];
-		new_recovfe_struct->scuversion.data =
-				log_buffer[FABRIC_ERR_SCU_VERSIONINFO];
-		new_recovfe_struct->errortype.data =
-				log_buffer[FABRIC_ERR_ERRORTYPE];
-		new_recovfe_struct->regid0.data =
-				log_buffer[FABRIC_ERR_REGID0];
-		memcpy(new_recovfe_struct->dumpDw1,
-				log_buffer + FABRIC_ERR_RECV_DUMP_START,
-				FABRIC_ERR_RECV_DUMP_LENGTH *
-					sizeof(log_buffer[0]));
-		memcpy(new_recovfe_struct->dumpDw2,
-				log_buffer + FABRIC_ERR_RECV_DUMP_START2,
-				FABRIC_ERR_RECV_DUMP_LENGTH *
-					sizeof(log_buffer[0]));
-
-		/* Push on the stack of SCU recoverable events */
-		spin_lock(&pending_recovfe_lock);
-		list_add_tail(&(new_recovfe_struct->list),
-					&(pending_recovfe_list.list));
-
-		spin_unlock(&pending_recovfe_lock);
-
 		return IRQ_WAKE_THREAD;
 
 	} else if (global_unsolicit_scutrace_enable) {
@@ -1575,75 +1498,11 @@ static irqreturn_t recoverable_faberror_irq(int irq, void *ignored)
 	return IRQ_WAKE_THREAD;
 }
 
-#define LENGTH_HEX_VALUE	18	/* > sizeof("DW12:0x12345678") +1 */
 static irqreturn_t recoverable_faberror_thread(int irq, void *ignored)
 {
 	struct list_head *pos, *q;
 	struct sculog_list *tmp;
-	struct recovfe_list *iter;
 	unsigned long flags;
-
-#ifdef CONFIG_TRACEPOINT_TO_EVENT
-	char sData0[LENGTH_HEX_VALUE];
-	char sData1[LENGTH_HEX_VALUE];
-	char sData2[LENGTH_HEX_VALUE];
-	char sData3[LENGTH_HEX_VALUE*FABRIC_ERR_RECV_DUMP_LENGTH];
-	char sData4[LENGTH_HEX_VALUE*FABRIC_ERR_RECV_DUMP_LENGTH];
-	char sData5[LENGTH_HEX_VALUE];
-	int  idx;
-	int  len;
-#endif
-
-	spin_lock_irqsave(&pending_recovfe_lock, flags);
-
-	/* Flush remaining SCU trace log if any left */
-	list_for_each_safe(pos, q, &pending_recovfe_list.list) {
-		iter = list_entry(pos, struct recovfe_list, list);
-
-#ifdef CONFIG_TRACEPOINT_TO_EVENT
-		snprintf(sData0, sizeof(sData0), "DW3:0x%08x",
-			iter->errortype.data);
-		snprintf(sData1, sizeof(sData1), "DW0:0x%08x",
-			iter->header.data);
-		snprintf(sData2, sizeof(sData2), "DW4:0x%08x",
-			iter->regid0.data);
-
-		len = snprintf(sData3, sizeof(sData3), "DW%d:0x%08x",
-				FABRIC_ERR_RECV_DUMP_START, iter->dumpDw1[0]);
-		for (idx = 1; idx < FABRIC_ERR_RECV_DUMP_LENGTH; idx++) {
-			len += snprintf(sData3 + len, sizeof(sData3) - len,
-				" DW%d:0x%08x",
-				FABRIC_ERR_RECV_DUMP_START + idx,
-				iter->dumpDw1[idx]);
-		}
-
-		len = snprintf(sData4, sizeof(sData4), "DW%d:0x%08x",
-				FABRIC_ERR_RECV_DUMP_START2, iter->dumpDw2[0]);
-		for (idx = 1; idx < FABRIC_ERR_RECV_DUMP_LENGTH; idx++) {
-			len += snprintf(sData4 + len, sizeof(sData4) - len,
-				" DW%d:0x%08x",
-				FABRIC_ERR_RECV_DUMP_START2 + idx,
-				iter->dumpDw2[idx]);
-		}
-
-		snprintf(sData5, sizeof(sData5), "DW2:0x%08x",
-			iter->scuversion.data);
-
-		/* function added to create a crashtool event on condition */
-		trace_tp2e_scu_recov_event(TP2E_EV_ERROR,
-					"Fabric", "Recov",
-					sData0, sData1, sData2,
-					sData3, sData4, sData5,
-					"/proc/ipanic_fabric_recv_err");
-#else
-		pr_info("SCU IRQ: TP2E not enabled\n");
-#endif
-
-		list_del(pos);
-		kfree(iter);
-	}
-
-	spin_unlock_irqrestore(&pending_recovfe_lock, flags);
 
 	if (global_unsolicit_scutrace_enable) {
 
@@ -2088,9 +1947,7 @@ static ssize_t scutrace_status_store(struct device *dev,
 	int ret = 0, rbuflen = 4;
 
 	char action[MAX_INPUT_LENGTH];
-	char format[10];
-	snprintf(format, sizeof(format), "%%%ds", MAX_INPUT_LENGTH-1);
-	sscanf(buffer, format, action);
+	sscanf(buffer, "%s", action);
 
 	if (!strcmp(action, "enabled")) {
 
@@ -2148,9 +2005,7 @@ static ssize_t unsolicit_scutrace_store(struct device *dev,
 	int ret = 0, rbuflen = 4;
 
 	char action[MAX_INPUT_LENGTH];
-	char format[10];
-	snprintf(format, sizeof(format), "%%%ds", MAX_INPUT_LENGTH-1);
-	sscanf(buffer, format, action);
+	sscanf(buffer, "%s", action);
 
 	if (!strcmp(action, "enabled")) {
 
@@ -2358,7 +2213,6 @@ static int intel_fw_logging_init(void)
 	io_apic_set_pci_routing(NULL, RECOVERABLE_FABERR_INT, &irq_attr);
 
 	INIT_LIST_HEAD(&pending_sculog_list.list);
-	INIT_LIST_HEAD(&pending_recovfe_list.list);
 
 	recoverable_irq = RECOVERABLE_FABERR_INT;
 	err = request_threaded_irq(RECOVERABLE_FABERR_INT,

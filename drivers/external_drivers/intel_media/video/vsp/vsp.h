@@ -82,9 +82,6 @@
 #define VSP_FIRMWARE_MEM_ALIGNMENT 4096
 /* #define VP8_ENC_DEBUG 1 */
 
-#define MAX_VP8_CONTEXT_NUM 3
-#define MAX_VPP_CONTEXT_NUM 1
-
 static const unsigned int vsp_processor_base[] = {
 				SP0_SP_REG_BASE,
 				SP1_SP_REG_BASE,
@@ -264,12 +261,14 @@ struct vsp_private {
 	struct VssVp8encPictureParameterBuffer *vp8_encode_frame_cmd;
 	struct ttm_bo_kmap_obj vp8_encode_frame__kmap;
 
-	/* For VP8 dual encoding */
-	struct file *vp8_filp[4];
-	int context_vp8_num;
+	void *coded_buf;
+	struct ttm_bo_kmap_obj coded_buf_kmap;
+	struct ttm_buffer_object *coded_buf_bo;
+	int context_num;
 
-	/* The context number of VPP */
-	int context_vpp_num;
+	/* For VP8 dual encoding */
+	struct file *vp8_filp[2];
+	int context_vp8_num;
 
 	/*
 	 * to fix problem when CTRL+C vp8 encoding *
@@ -281,16 +280,6 @@ struct vsp_private {
 
 	/* to save the last sequence */
 	uint32_t last_sequence;
-
-	/* VPP pnp usage */
-	unsigned long cmd_submit_time;
-	int acc_num_cmd;
-	int force_flush_cmd;
-	int delayed_burst_cnt;
-	struct delayed_work vsp_cmd_submit_check_wq;
-
-	/* Composer related */
-	uint32_t compose_fence;
 };
 
 extern int vsp_init(struct drm_device *dev);
@@ -331,7 +320,6 @@ extern int psb_vsp_dump_info(struct drm_psb_private *dev_priv);
 
 extern void psb_powerdown_vsp(struct work_struct *work);
 extern void vsp_irq_task(struct work_struct *work);
-extern void vsp_cmd_submit_check(struct work_struct *work);
 
 static inline
 unsigned int vsp_is_idle(struct drm_psb_private *dev_priv,

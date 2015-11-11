@@ -83,8 +83,12 @@ unsigned long long read_shim_data(struct intel_sst_drv *sst, int addr)
 	unsigned long long val = 0;
 
 	switch (sst->pci_id) {
+	case SST_CLV_PCI_ID:
+		val = sst_shim_read(sst->shim, addr);
+		break;
 	case SST_MRFLD_PCI_ID:
 	case PCI_DEVICE_ID_INTEL_SST_MOOR:
+	case SST_BYT_PCI_ID:
 		val = sst_shim_read64(sst->shim, addr);
 		break;
 	}
@@ -95,8 +99,12 @@ void write_shim_data(struct intel_sst_drv *sst, int addr,
 				unsigned long long data)
 {
 	switch (sst->pci_id) {
+	case SST_CLV_PCI_ID:
+		sst_shim_write(sst->shim, addr, (u32) data);
+		break;
 	case SST_MRFLD_PCI_ID:
 	case PCI_DEVICE_ID_INTEL_SST_MOOR:
+	case SST_BYT_PCI_ID:
 		sst_shim_write64(sst->shim, addr, (u64) data);
 		break;
 	}
@@ -167,6 +175,31 @@ void reset_sst_shim(struct intel_sst_drv *sst)
 	csr.full &= ~(0xf);
 	csr.full |= 0x01;
 	sst_shim_write64(sst_drv_ctx->shim, SST_CSR, csr.full);
+}
+
+static void dump_sst_crash_area(void)
+{
+	void __iomem *fw_dump_area;
+	u32 dump_word;
+	u8 i;
+
+	/* dump the firmware SRAM where the exception details are stored */
+	fw_dump_area = ioremap_nocache(SST_EXCE_DUMP_BASE, SST_EXCE_DUMP_SIZE);
+
+	pr_err("Firmware exception dump begins:\n");
+	pr_err("Exception start signature:%#x\n", readl(fw_dump_area + SST_EXCE_DUMP_WORD));
+	pr_err("EXCCAUSE:\t\t\t%#x\n", readl(fw_dump_area + SST_EXCE_DUMP_WORD*2));
+	pr_err("EXCVADDR:\t\t\t%#x\n", readl(fw_dump_area + (SST_EXCE_DUMP_WORD*3)));
+	pr_err("Firmware additional data:\n");
+
+	/* dump remaining FW debug data */
+	for (i = 1; i < (SST_EXCE_DUMP_LEN-4+1); i++) {
+		dump_word = readl(fw_dump_area + (SST_EXCE_DUMP_WORD*3)
+						+ (i*SST_EXCE_DUMP_WORD));
+		pr_err("Data[%d]=%#x\n", i, dump_word);
+	}
+	iounmap(fw_dump_area);
+	pr_err("Firmware exception dump ends\n");
 }
 
 /**
@@ -331,7 +364,7 @@ void sst_do_recovery_mrfld(struct intel_sst_drv *sst)
 	int env_offset = 0;
 
 	/*
-	 * setting firmware state as RESET so that the firmware will get
+	 * setting firmware state as uninit so that the firmware will get
 	 * redownloaded on next request.This is because firmare not responding
 	 * for 1 sec is equalant to some unrecoverable error of FW.
 	 */
@@ -339,7 +372,7 @@ void sst_do_recovery_mrfld(struct intel_sst_drv *sst)
 	pr_err("Audio: trying to reset the dsp now\n");
 
 	mutex_lock(&sst->sst_lock);
-	sst->sst_state = SST_RESET;
+	sst->sst_state = SST_UN_INIT;
 	sst_stream_recovery(sst);
 	mutex_unlock(&sst->sst_lock);
 
@@ -405,6 +438,10 @@ void sst_do_recovery(struct intel_sst_drv *sst)
 	dump_stack();
 	dump_sst_shim(sst);
 
+	if (sst->sst_state == SST_FW_RUNNING &&
+		sst_drv_ctx->pci_id == SST_CLV_PCI_ID)
+		dump_sst_crash_area();
+
 	sst_dump_ipc_dispatch_lists(sst_drv_ctx);
 
 }
@@ -439,10 +476,11 @@ int sst_wait_timeout(struct intel_sst_drv *sst_drv_ctx, struct sst_block *block)
 		pr_err("sst: Wait timed-out condition:%#x, msg_id:%#x fw_state %#x\n",
 				block->condition, block->msg_id, sst_drv_ctx->sst_state);
 
-		if (sst_drv_ctx->sst_state == SST_FW_LOADING) {
+		if (sst_drv_ctx->sst_state == SST_FW_LOADED ||
+			sst_drv_ctx->sst_state ==  SST_START_INIT) {
 			pr_err("Can't recover as timedout while downloading the FW\n");
-			pr_err("reseting fw state to RESET from %d ...\n", sst_drv_ctx->sst_state);
-			sst_drv_ctx->sst_state = SST_RESET;
+			pr_err("reseting fw state to unint from %d ...\n", sst_drv_ctx->sst_state);
+			sst_drv_ctx->sst_state = SST_UN_INIT;
 
 			dump_sst_shim(sst_drv_ctx);
 

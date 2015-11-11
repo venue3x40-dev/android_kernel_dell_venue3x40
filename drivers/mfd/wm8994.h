@@ -21,5 +21,8 @@ extern struct regmap_config wm1811_regmap_config;
 extern struct regmap_config wm8994_regmap_config;
 extern struct regmap_config wm8958_regmap_config;
 extern struct regmap_config wm8994_base_regmap_config;
+//add by fjz
+extern struct regmap_config wm8958_8inch_regmap_config;
+//end
 
 #endif

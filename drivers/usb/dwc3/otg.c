@@ -69,6 +69,10 @@
 #include <linux/version.h>
 #include <linux/wakelock.h>
 
+//MD:add for wireless charger
+#include <linux/gpio.h>
+#include <linux/intel_mid_hwid.h>
+#define WIRELESS_EN1 45
 #include "otg.h"
 
 #define VERSION "2.10a"
@@ -475,7 +479,8 @@ static enum dwc_otg_state do_charger_detection(struct dwc_otg2 *otg)
 	enum power_supply_charger_cable_type charger =
 			POWER_SUPPLY_CHARGER_TYPE_NONE;
 	unsigned long flags, ma = 0;
-
+	int gpio_value;
+	gpio_value = gpio_get_value(WIRELESS_EN1);
 	charger = get_charger_type(otg);
 	switch (charger) {
 	case POWER_SUPPLY_CHARGER_TYPE_ACA_A:
@@ -489,7 +494,6 @@ static enum dwc_otg_state do_charger_detection(struct dwc_otg2 *otg)
 		state = DWC_STATE_B_PERIPHERAL;
 		break;
 	case POWER_SUPPLY_CHARGER_TYPE_ACA_DOCK:
-	case POWER_SUPPLY_CHARGER_TYPE_B_DEVICE:
 		state = DWC_STATE_A_HOST;
 		break;
 	case POWER_SUPPLY_CHARGER_TYPE_USB_DCP:
@@ -498,11 +502,15 @@ static enum dwc_otg_state do_charger_detection(struct dwc_otg2 *otg)
 		break;
 	case POWER_SUPPLY_CHARGER_TYPE_NONE:
 	default:
-		if (is_self_powered_b_device(otg)) {
+		if((!(intel_mid_get_board_id() & HW_BOARD_7_LTE)) && (!gpio_value)){
+			charger = POWER_SUPPLY_CHARGER_TYPE_USB_SDP;
+			state = DWC_STATE_CHARGING;
+			printk("%s:detecting wireless charger:ma=%d .\n",__func__,ma);
+		}else if (is_self_powered_b_device(otg)) {
 			state = DWC_STATE_A_HOST;
 			charger = POWER_SUPPLY_CHARGER_TYPE_B_DEVICE;
-			break;
 		}
+			break;
 	};
 
 	switch (charger) {
@@ -516,7 +524,11 @@ static enum dwc_otg_state do_charger_detection(struct dwc_otg2 *otg)
 		ma = 1500;
 		break;
 	case POWER_SUPPLY_CHARGER_TYPE_USB_SDP:
-	case POWER_SUPPLY_CHARGER_TYPE_B_DEVICE:
+	/* MD:add for wireless charger */
+		if((!(intel_mid_get_board_id() & HW_BOARD_7_LTE)) && (!gpio_value)){
+			ma = 900;
+			printk("%s:have detected the wireless charger:ma=%d .\n",__func__,ma);
+		}
 		break;
 	default:
 		otg_err(otg, "Charger type is not valid to notify battery\n");
@@ -538,6 +550,13 @@ static enum dwc_otg_state do_charger_detection(struct dwc_otg2 *otg)
 			otg_err(otg, "Notify battery type failed!\n");
 		break;
 	case POWER_SUPPLY_CHARGER_TYPE_USB_SDP:
+	/* MD:add for wireless charger */
+		if((!(intel_mid_get_board_id() & HW_BOARD_7_LTE)) && (!gpio_value)){
+			printk("%s:use the wireless charger.\n",__func__);
+			if(dwc_otg_notify_charger_type(otg,
+						POWER_SUPPLY_CHARGER_EVENT_CONNECT) < 0)
+				otg_err(otg, "Notify battery type failed!\n");
+		}
 	/* SDP is complicate, it will be handle in set_power */
 	default:
 		break;
@@ -649,7 +668,8 @@ stay_host:
 
 	user_mask = USER_A_BUS_DROP |
 				USER_ID_B_CHANGE_EVENT;
-	otg_mask = OEVT_CONN_ID_STS_CHNG_EVNT;
+	otg_mask = OEVT_CONN_ID_STS_CHNG_EVNT |
+			OEVT_A_DEV_SESS_END_DET_EVNT;
 
 	rc = sleep_until_event(otg,
 			otg_mask, user_mask,
@@ -875,7 +895,6 @@ static void start_main_thread(struct dwc_otg2 *otg)
 {
 	enum dwc3_otg_mode mode = dwc3_otg_pdata->mode;
 	bool children_ready = false;
-	struct pci_dev	*pdev = container_of(otg->dev, struct pci_dev, dev);
 
 	mutex_lock(&lock);
 
@@ -1457,6 +1476,10 @@ static DEFINE_PCI_DEVICE_TABLE(pci_ids) = {
 	{ PCI_DEVICE_CLASS(((PCI_CLASS_SERIAL_USB << 8) | 0x80), ~0),
 		.vendor = PCI_VENDOR_ID_INTEL,
 		.device = PCI_DEVICE_ID_DWC,
+	},
+	{ PCI_DEVICE_CLASS(((PCI_CLASS_SERIAL_USB << 8) | 0x80), ~0),
+		.vendor = PCI_VENDOR_ID_INTEL,
+		.device = PCI_DEVICE_ID_DWC_VLV,
 	},
 	{ /* end: all zeroes */ }
 };

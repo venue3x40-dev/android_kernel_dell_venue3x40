@@ -178,7 +178,6 @@ struct rmi4_data {
 	u16		        fn01_ctrl_base_addr;
 	u16		        fn01_query_base_addr;
 	u16                     fn01_data_base_addr;
-	u8			fn01_ctrl_reg_saved;
 	int			current_page;
 	int			sensor_max_x;
 	int			sensor_max_y;
@@ -194,10 +193,6 @@ struct rmi4_data {
 #ifdef DEBUG
 	u16 dbg_reg_addr;
 	unsigned short dbg_fn_num;
-#endif
-#ifdef CONFIG_DEBUG_FS
-	u8 num_rx;
-	u8 num_tx;
 #endif
 };
 
@@ -234,36 +229,6 @@ struct rmi4_touchpad_data {
 	u8 *buffer;
 	int size;
 };
-
-#ifdef CONFIG_DEBUG_FS
-/* Supported Fn $54 commands */
-#define GET_REPORT		1
-
-/*Supported Fn $54  Report types*/
-#define F54_RAW_16BIT_IMAGE	3
-
-/**
- * struct rmi4_ana_data - contains analog data reporting function data
- * @i2c_client: pointer for i2c client (for sysfs)
- * @rx: number of receiver electrodes
- * @tx: number of transmitter electrodes
- * @cmd: f54 command
- * @reporttype: f54 report type
- * @buffer: buffer to store values
- * @status: status of the operation
- * @size: size of the buffer
- */
-struct rmi4_ana_data {
-	struct i2c_client *i2c_client;
-	u8 rx;
-	u8 tx;
-	u8 cmd;
-	u32  reporttype;
-	u8 *buffer;
-	int status;
-	int size;
-};
-#endif
 
 union pdt_properties {
 	struct {
@@ -477,10 +442,6 @@ int rmi4_i2c_byte_read(struct rmi4_data *pdata, u16 addr, u8 *val);
 int rmi4_i2c_block_write(struct rmi4_data *pdata, u16 addr, u8 *val, int size);
 int rmi4_i2c_byte_write(struct rmi4_data *pdata, u16 addr, u8 data);
 
-int rmi4_dev_ctl_detect(struct rmi4_data *pdata,
-				struct rmi4_fn *rfi, unsigned int cnt);
-int rmi4_dev_ctl_irq_handler(struct rmi4_data *pdata, struct rmi4_fn *rfi);
-
 int rmi4_touchpad_detect(struct rmi4_data *pdata,
 				struct rmi4_fn *rfi, unsigned int cnt);
 int rmi4_touchpad_config(struct rmi4_data *pdata, struct rmi4_fn *rfi);
@@ -500,11 +461,4 @@ void rmi4_button_remove(struct rmi4_fn *);
 
 int rmi4_fw_update(struct rmi4_data *pdata,
 		struct rmi4_fn_desc *f01_pdt, struct rmi4_fn_desc *f34_pdt);
-
-#ifdef CONFIG_DEBUG_FS
-int rmi4_ana_data_detect(struct rmi4_data *pdata,
-				struct rmi4_fn *rfi, unsigned int intr_cnt);
-int rmi4_ana_data_irq_handler(struct rmi4_data *pdata, struct rmi4_fn *rfi);
-void rmi4_ana_data_remove(struct rmi4_fn *rfi);
-#endif
 #endif

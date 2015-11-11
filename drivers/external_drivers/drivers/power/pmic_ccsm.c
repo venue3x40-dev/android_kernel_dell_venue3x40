@@ -62,6 +62,8 @@
 #include <linux/notifier.h>
 #include <linux/power/battery_id.h>
 #include "pmic_ccsm.h"
+#include <linux/gpio.h>
+#include <linux/intel_mid_hwid.h>
 
 /* Macros */
 #define DRIVER_NAME "pmic_ccsm"
@@ -85,6 +87,11 @@
 
 /* 100mA value definition for setting the inlimit in bq24261 */
 #define USBINPUTICC100VAL	100
+
+/* Define OTP enable pin */
+static int wireless_en1;
+extern int get_gpio_by_name(const char *name);
+static bool wirlss_notify = false;
 
 /* Type definitions */
 static void pmic_bat_zone_changed(void);
@@ -141,8 +148,17 @@ u16 pmic_inlmt[][2] = {
 	{ 900, CHGRCTRL1_FUSB_INLMT_900},
 	{ 1500, CHGRCTRL1_FUSB_INLMT_1500},
 };
-
-
+// MD:add for wireless charger
+static int __init wireless_cos_char(char *str)
+{
+	if(strncmp(str,"charger",7)==0){
+		printk("sys in COS,pull wireless_en high,disable OTG.\n");
+		wirlss_notify = true;
+	}	
+	printk("MD add cmdline reading.\n");
+	return 1;	
+} 
+__setup("androidboot.mode=",wireless_cos_char);
 static inline struct power_supply *get_psy_battery(void)
 {
 	struct class_dev_iter iter;
@@ -663,29 +679,6 @@ static void pmic_debugfs_exit(void)
 }
 #endif
 
-static void pmic_get_bat_zone(int *bat_zone)
-{
-	u8 data = 0;
-	u16 addr = 0;
-	int vendor_id, ret;
-
-	vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
-	if (vendor_id == BASINCOVE_VENDORID)
-		addr = THRMBATZONE_ADDR_BC;
-	else if (vendor_id == SHADYCOVE_VENDORID)
-		addr = THRMBATZONE_ADDR_SC;
-
-	ret = intel_scu_ipc_ioread8(addr, &data);
-	if (ret) {
-		dev_err(chc.dev, "Error:%d in reading battery zone\n", ret);
-		/* Return undetermined zone in case of IPC failure */
-		*bat_zone = PMIC_BZONE_UNKNOWN;
-		return;
-	}
-
-	*bat_zone = (data & THRMBATZONE_MASK);
-}
-
 static void pmic_bat_zone_changed(void)
 {
 	int retval;
@@ -695,16 +688,26 @@ static void pmic_bat_zone_changed(void)
 	struct power_supply *psy_bat;
 	int vendor_id;
 
-	pmic_get_bat_zone(&cur_zone);
+	vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
+	if (vendor_id == BASINCOVE_VENDORID)
+		addr = THRMBATZONE_ADDR_BC;
+	else if (vendor_id == SHADYCOVE_VENDORID)
+		addr = THRMBATZONE_ADDR_SC;
+
+	retval = intel_scu_ipc_ioread8(addr, &data);
+	if (retval) {
+		dev_err(chc.dev, "Error in reading battery zone\n");
+		return;
+	}
+
+	cur_zone = data & THRMBATZONE_MASK;
 	dev_info(chc.dev, "Battery Zone changed. Current zone is %d\n",
-			cur_zone);
+			(data & THRMBATZONE_MASK));
 
 	/* if current zone is the top and bottom zones then report OVERHEAT
 	 */
 	if ((cur_zone == PMIC_BZONE_LOW) || (cur_zone == PMIC_BZONE_HIGH))
 		chc.health = POWER_SUPPLY_HEALTH_OVERHEAT;
-	else if (cur_zone == PMIC_BZONE_UNKNOWN)
-		chc.health = POWER_SUPPLY_HEALTH_UNKNOWN;
 	else
 		chc.health = POWER_SUPPLY_HEALTH_GOOD;
 
@@ -732,61 +735,30 @@ int pmic_get_health(void)
 
 int pmic_enable_vbus(bool enable)
 {
-	int ret = 0;
-
-	if (enable)
-		ret = intel_scu_ipc_update_register(CHGRCTRL0_ADDR,
-				WDT_NOKICK_ENABLE, CHGRCTRL0_WDT_NOKICK_MASK);
-	else
-		ret = intel_scu_ipc_update_register(CHGRCTRL0_ADDR,
-				WDT_NOKICK_DISABLE, CHGRCTRL0_WDT_NOKICK_MASK);
-
-	/* If access is blocked return success to avoid additional
-	*  error handling at client side
-	*/
-	if (ret == -EACCES) {
-		dev_warn(chc.dev, "IPC blocked due to unsigned kernel/invalid battery\n");
-		ret = 0;
-	}
-
-	return ret;
-}
-
-int pmic_handle_otgmode(bool enable)
-{
-	int ret = 0;
+	int ret;
 	int vendor_id;
 
 	vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
 
-	if (vendor_id != SHADYCOVE_VENDORID) {
-		dev_err(chc.dev, "Ignore otg-mode event received\n");
-		return 0;
-	}
-
 	if (enable) {
-		ret = intel_scu_ipc_update_register(CHGRCTRL1_ADDR,
-				CHGRCTRL1_OTGMODE_MASK,
-				CHGRCTRL1_OTGMODE_MASK);
+		ret = intel_scu_ipc_update_register(CHGRCTRL0_ADDR,
+				WDT_NOKICK_ENABLE, CHGRCTRL0_WDT_NOKICK_MASK);
+		if (ret)
+			return ret;
 
-		/* ShadyCove PMIC doesn’t kick charger-WDT during host-mode.
-		 * Driver does this regularly as a w/a. But, during suspend,
-		 * since this driver code doesn’t run, VBUS drops, DUT wakes
-		 * up, and re-enumerates again.
-		 * Hence, during host-mode, driver shall hold a wakelock.
-		 */
-		dev_info(chc.dev, "Hold wakelock for host-mode WDT-kick\n");
-		if (!wake_lock_active(&chc.otg_wa_wakelock)) {
-			wake_lock(&chc.otg_wa_wakelock);
-		}
+		if (vendor_id == SHADYCOVE_VENDORID)
+			ret = intel_scu_ipc_update_register(CHGRCTRL1_ADDR,
+					CHGRCTRL1_OTGMODE_MASK,
+					CHGRCTRL1_OTGMODE_MASK);
 	} else {
-		ret = intel_scu_ipc_update_register(CHGRCTRL1_ADDR,
-				0x0, CHGRCTRL1_OTGMODE_MASK);
+		ret = intel_scu_ipc_update_register(CHGRCTRL0_ADDR,
+				WDT_NOKICK_DISABLE, CHGRCTRL0_WDT_NOKICK_MASK);
+		if (ret)
+			return ret;
 
-		dev_info(chc.dev, "Release wakelock for host-mode WDT-kick\n");
-		if (wake_lock_active(&chc.otg_wa_wakelock)) {
-			wake_unlock(&chc.otg_wa_wakelock);
-		}
+		if (vendor_id == SHADYCOVE_VENDORID)
+			ret = intel_scu_ipc_update_register(CHGRCTRL1_ADDR,
+					0x0, CHGRCTRL1_OTGMODE_MASK);
 	}
 
 	/* If access is blocked return success to avoid additional
@@ -856,32 +828,6 @@ static inline int update_zone_temp(int zone, u16 adc_val)
 			offset_zone += 1;
 
 		addr_tzone = THRMZN4H_ADDR_SC - (2 * offset_zone);
-
-		/*
-		 * Override the adc values received from the LUT with the
-		 * values received from the PMIC hatdware team. SC pmic gets
-		 * 12-bit of ADC results however only 9-bits of the values can
-		 * be programmed into the temperature zone registers.
-		 */
-		switch (zone) {
-		case 0:
-			adc_val = THRMZN4_SC_ADCVAL;
-			break;
-		case 1:
-			adc_val = THRMZN3_SC_ADCVAL;
-			break;
-		case 2:
-			adc_val = THRMZN2_SC_ADCVAL;
-			break;
-		case 3:
-			adc_val = THRMZN1_SC_ADCVAL;
-			break;
-		case 4:
-			adc_val = THRMZN0_SC_ADCVAL;
-			break;
-		default:
-			dev_err(chc.dev, "no ADC default values\n");
-		}
 	} else {
 		dev_err(chc.dev, "%s: invalid vendor id %X\n", __func__, vendor_id);
 		return -EINVAL;
@@ -903,11 +849,8 @@ int pmic_set_cc(int new_cc)
 	int temp_mon_ranges;
 	int new_cc1;
 	int ret;
-	int i, cur_zone;
+	int i;
 	u8 reg_val = 0;
-
-	pmic_get_bat_zone(&cur_zone);
-	dev_info(chc.dev, "%s: Battery Zone:%d\n", __func__, cur_zone);
 
 	/* No need to write PMIC if CC = 0 */
 	if (!new_cc)
@@ -945,11 +888,8 @@ int pmic_set_cv(int new_cv)
 	int temp_mon_ranges;
 	int new_cv1;
 	int ret;
-	int i, cur_zone;
+	int i;
 	u8 reg_val = 0;
-
-	pmic_get_bat_zone(&cur_zone);
-	dev_info(chc.dev, "%s: Battery Zone:%d\n", __func__, cur_zone);
 
 	/* No need to write PMIC if CV = 0 */
 	if (!new_cv)
@@ -1064,59 +1004,11 @@ int pmic_get_battery_pack_temp(int *temp)
 	return pmic_read_adc_val(GPADC_BATTEMP0, temp, &chc);
 }
 
-static int scove_get_usbid(void)
-{
-	int ret;
-	struct iio_channel *indio_chan;
-	int rid, id = RID_UNKNOWN;
-	u8 val;
-
-	ret = pmic_read_reg(SCHGRIRQ1_ADDR, &val);
-	if (ret) {
-		dev_err(chc.dev,
-			"Error reading SCHGRIRQ1-register 0x%2x\n",
-			SCHGRIRQ1_ADDR);
-		return ret;
-	}
-
-	/* SCHGRIRQ1_REG SUSBIDDET bit definition:
-	 * 00 = RID_A/B/C ; 01 = RID_GND ; 10 = RID_FLOAT */
-	if ((val & SCHRGRIRQ1_SUSBIDGNDDET_MASK) == SHRT_FLT_DET)
-		return RID_FLOAT;
-	else if ((val & SCHRGRIRQ1_SUSBIDGNDDET_MASK) == SHRT_GND_DET)
-		return RID_GND;
-
-	indio_chan = iio_channel_get(NULL, "USBID");
-	if (IS_ERR_OR_NULL(indio_chan)) {
-		dev_err(chc.dev, "Failed to get IIO channel USBID\n");
-		ret = PTR_ERR(indio_chan);
-		goto exit;
-	}
-
-	ret = iio_read_channel_raw(indio_chan, &rid);
-	if (ret) {
-		dev_err(chc.dev, "IIO channel read error for USBID\n");
-		goto err_exit;
-	}
-
-	if ((rid > 11150) && (rid < 13640))
-		id = RID_A;
-	else if ((rid > 6120) && (rid < 7480))
-		id = RID_B;
-	else if ((rid > 3285) && (rid < 4015))
-		id = RID_C;
-
-err_exit:
-	iio_channel_release(indio_chan);
-exit:
-	return id;
-}
-
-static int get_charger_type(void)
+static int get_charger_type()
 {
 	int ret, i = 0;
 	u8 val;
-	int chgr_type, rid;
+	int chgr_type;
 
 	do {
 		ret = pmic_read_reg(USBSRCDETSTATUS_ADDR, &val);
@@ -1148,18 +1040,13 @@ static int get_charger_type(void)
 
 	switch (chgr_type) {
 	case PMIC_CHARGER_TYPE_SDP:
-	case PMIC_CHARGER_TYPE_FLOAT_DP_DN:
 		return POWER_SUPPLY_CHARGER_TYPE_USB_SDP;
 	case PMIC_CHARGER_TYPE_DCP:
 		return POWER_SUPPLY_CHARGER_TYPE_USB_DCP;
 	case PMIC_CHARGER_TYPE_CDP:
 		return POWER_SUPPLY_CHARGER_TYPE_USB_CDP;
 	case PMIC_CHARGER_TYPE_ACA:
-		rid = scove_get_usbid();
-		if (rid == RID_A)
-			return POWER_SUPPLY_CHARGER_TYPE_ACA_DOCK;
-		else if (rid != RID_UNKNOWN)
-			return POWER_SUPPLY_CHARGER_TYPE_USB_ACA;
+		return POWER_SUPPLY_CHARGER_TYPE_USB_ACA;
 	case PMIC_CHARGER_TYPE_SE1:
 		return POWER_SUPPLY_CHARGER_TYPE_SE1;
 	case PMIC_CHARGER_TYPE_MHL:
@@ -1185,10 +1072,8 @@ static void handle_internal_usbphy_notifications(int mask)
 	if (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_USB_SDP)
 		cap.ma = 0;
 	else if ((cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_USB_DCP)
-			|| (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_USB_CDP)
-			|| (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_SE1)
-			|| (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_USB_ACA)
-			|| (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_ACA_DOCK))
+			|| (cap.chrg_type == POWER_SUPPLY_TYPE_USB_CDP)
+			|| (cap.chrg_type == POWER_SUPPLY_CHARGER_TYPE_SE1))
 		cap.ma = 1500;
 
 	dev_info(chc.dev, "Notifying OTG ev:%d, evt:%d, chrg_type:%d, mA:%d\n",
@@ -1224,19 +1109,13 @@ int pmic_handle_low_supply(void)
 		int mask = 0;
 
 		dev_info(chc.dev, "USB VBUS Removed. Notifying OTG driver\n");
-		mutex_lock(&chc.evt_queue_lock);
 		chc.vbus_connect_status = false;
-		mutex_unlock(&chc.evt_queue_lock);
 
-		if (chc.is_internal_usb_phy && !chc.otg_mode_enabled)
+		if (chc.is_internal_usb_phy)
 			handle_internal_usbphy_notifications(mask);
-		else {
+		else
 			atomic_notifier_call_chain(&chc.otg->notifier,
 					USB_EVENT_VBUS, &mask);
-			mutex_lock(&chc.evt_queue_lock);
-			chc.otg_mode_enabled = false;
-			mutex_unlock(&chc.evt_queue_lock);
-		}
 	}
 
 	return ret;
@@ -1297,45 +1176,30 @@ static void handle_level0_interrupt(u8 int_reg, u8 stat_reg,
 static void handle_level1_interrupt(u8 int_reg, u8 stat_reg)
 {
 	int mask;
-	u8 val;
+	u8 usb_id_sts;
 	int ret;
-	int vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
 
 	if (!int_reg)
 		return;
 
-	if (vendor_id == SHADYCOVE_VENDORID) {
-		if (int_reg & CHRGRIRQ1_SUSBIDFLTDET_MASK)
-			dev_info(chc.dev,
-				"USBID-FLT interrupt received\n");
-
-		mask = ((stat_reg & SCHRGRIRQ1_SUSBIDGNDDET_MASK)
-				== SHRT_GND_DET) ? 1 : 0;
-		if (int_reg & CHRGRIRQ1_SUSBIDGNDDET_MASK) {
-			if (mask)
-				dev_info(chc.dev,
-				"USBID-GND Detected. Notifying OTG\n");
-			else
-				dev_info(chc.dev,
-				"USBID-GND Removed. Notifying OTG\n");
-
-			atomic_notifier_call_chain(&chc.otg->notifier,
-					USB_EVENT_ID, &mask);
-		}
-	}
-
 	mask = !!(int_reg & stat_reg);
-	if ((vendor_id == BASINCOVE_VENDORID) &&
-			(int_reg & CHRGRIRQ1_SUSBIDDET_MASK)) {
-		if (mask)
+	if ((int_reg & CHRGRIRQ1_SUSBIDDET_MASK) && (!wirlss_notify)){
+		if (stat_reg & SCHRGRIRQ1_SUSBIDDET_MASK)	{
 			dev_info(chc.dev,
 				"USB ID Detected. Notifying OTG driver\n");
-		else
+			/* Pull up wireless_en1 pin to enable OTG mode*/
+			if(!(intel_mid_get_board_id() & HW_BOARD_7_LTE)) 
+				gpio_set_value(wireless_en1,1);
+		} else {
 			dev_info(chc.dev,
 				"USB ID Removed. Notifying OTG driver\n");
-
+			/* Pull down wireless_en1 pin to disable OTG mode*/
+			if(!(intel_mid_get_board_id() & HW_BOARD_7_LTE))
+				gpio_set_value(wireless_en1,0);
+		}
 		atomic_notifier_call_chain(&chc.otg->notifier,
 				USB_EVENT_ID, &mask);
+		return;
 	}
 
 	if (int_reg & CHRGRIRQ1_SVBUSDET_MASK) {
@@ -1343,36 +1207,20 @@ static void handle_level1_interrupt(u8 int_reg, u8 stat_reg)
 			dev_info(chc.dev,
 				"USB VBUS Detected. Notifying OTG driver\n");
 			chc.vbus_connect_status = true;
-
-			ret = pmic_read_reg(CHGRCTRL1_ADDR, &val);
-			if (ret != 0) {
-				dev_err(chc.dev,
-				"Error reading CHGRCTRL1-register 0x%2x\n",
-				CHGRCTRL1_ADDR);
-				return;
-			}
-
-			if (val & CHGRCTRL1_OTGMODE_MASK)
-				chc.otg_mode_enabled = true;
 		} else {
 			dev_info(chc.dev, "USB VBUS Removed. Notifying OTG driver\n");
 			chc.vbus_connect_status = false;
 		}
 
-		/* Avoid charger-detection flow in case of host-mode */
-		if (chc.is_internal_usb_phy && !chc.otg_mode_enabled)
+		if (chc.is_internal_usb_phy)
 			handle_internal_usbphy_notifications(mask);
-		else {
+		else
 			atomic_notifier_call_chain(&chc.otg->notifier,
 					USB_EVENT_VBUS, &mask);
-			if (!mask)
-				chc.otg_mode_enabled = false;
-		}
 	}
 
 	return;
 }
-
 static void pmic_event_worker(struct work_struct *work)
 {
 	struct pmic_event *evt, *tmp;
@@ -1383,7 +1231,7 @@ static void pmic_event_worker(struct work_struct *work)
 	list_for_each_entry_safe(evt, tmp, &chc.evt_queue, node) {
 		list_del(&evt->node);
 
-		dev_info(chc.dev, "CHGRIRQ0=%X SCHGRIRQ0=%X CHGRIRQ1=%x SCHGRIRQ1=%X\n",
+		dev_dbg(chc.dev, "CHGRIRQ0=%X SCHGRIRQ0=%X CHGRIRQ1=%x SCHGRIRQ1=%X\n",
 				evt->chgrirq0_int, evt->chgrirq0_stat,
 				evt->chgrirq1_int, evt->chgrirq1_stat);
 		if (evt->chgrirq0_int)
@@ -1405,16 +1253,7 @@ static irqreturn_t pmic_isr(int irq, void *data)
 	u16 pmic_intr;
 	u8 chgrirq0_int;
 	u8 chgrirq1_int;
-	u8 mask = 0;
-	int vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
-
-	if (vendor_id == BASINCOVE_VENDORID)
-		mask = ((CHRGRIRQ1_SVBUSDET_MASK) |
-				(CHRGRIRQ1_SUSBIDDET_MASK));
-	else if (vendor_id == SHADYCOVE_VENDORID)
-		mask = ((CHRGRIRQ1_SVBUSDET_MASK) |
-				(CHRGRIRQ1_SUSBIDFLTDET_MASK) |
-				(CHRGRIRQ1_SUSBIDGNDDET_MASK));
+	u8 mask = ((CHRGRIRQ1_SVBUSDET_MASK) | (CHRGRIRQ1_SUSBIDDET_MASK));
 
 	pmic_intr = ioread16(chc.pmic_intr_iomap);
 	chgrirq0_int = (u8)pmic_intr;
@@ -1513,12 +1352,15 @@ end:
 
 	return IRQ_HANDLED;
 }
+
 static int pmic_init(void)
 {
 	int ret = 0, i, temp_mon_ranges;
 	u16 adc_val;
 	u8 reg_val;
 	struct ps_pse_mod_prof *bcprof = chc.actual_bcprof;
+
+
 	temp_mon_ranges = min_t(u16, bcprof->temp_mon_ranges,
 			BATT_TEMP_NR_RNG);
 	for (i = 0; i < temp_mon_ranges; ++i) {
@@ -1531,7 +1373,6 @@ static int pmic_init(void)
 				i);
 			return ret;
 		}
-
 		ret = update_zone_temp(i, adc_val);
 		if (unlikely(ret)) {
 			dev_err(chc.dev,
@@ -1727,7 +1568,6 @@ static int pmic_check_initial_events(void)
 	struct pmic_event *evt;
 	int ret;
 	u8 mask = (CHRGRIRQ1_SVBUSDET_MASK);
-	int vendor_id = chc.pmic_id & PMIC_VENDOR_ID_MASK;
 
 	evt = kzalloc(sizeof(struct pmic_event), GFP_KERNEL);
 	if (evt == NULL) {
@@ -1740,21 +1580,6 @@ static int pmic_check_initial_events(void)
 	evt->chgrirq0_int = evt->chgrirq0_stat;
 	ret = intel_scu_ipc_ioread8(SCHGRIRQ1_ADDR, &evt->chgrirq1_stat);
 	evt->chgrirq1_int = evt->chgrirq1_stat;
-
-	/* For ShadyCove, CHGRIRQ1_REG & SCHGRIRQ1_REG cannot be directly
-	 * mapped. If status has (01 = Short to ground detected), it means
-	 * USBIDGNDDET should be handled. If status has (10 = Floating pin
-	 * detected), it means USBIDFLTDET should be handled.
-	 */
-	if (vendor_id == SHADYCOVE_VENDORID) {
-		if ((evt->chgrirq1_stat & SCHRGRIRQ1_SUSBIDGNDDET_MASK)
-				== SHRT_FLT_DET) {
-			evt->chgrirq1_int |= CHRGRIRQ1_SUSBIDFLTDET_MASK;
-			evt->chgrirq1_int &= ~CHRGRIRQ1_SUSBIDGNDDET_MASK;
-		} else if ((evt->chgrirq1_stat & SCHRGRIRQ1_SUSBIDGNDDET_MASK)
-				== SHRT_GND_DET)
-			evt->chgrirq1_int |= CHRGRIRQ1_SUSBIDGNDDET_MASK;
-	}
 
 	if (evt->chgrirq1_stat || evt->chgrirq0_int) {
 		INIT_LIST_HEAD(&evt->node);
@@ -1776,6 +1601,41 @@ static int pmic_check_initial_events(void)
 	return ret;
 }
 
+//md add pmic_enable_swchgled: enable the charge led
+static void pmic_enable_swchgled(void)
+{
+	int retval = 0;
+	u8 val = 0;
+	//read the PMIC_CHGLEDCTRL 
+	retval = intel_scu_ipc_ioread8(PMIC_CHGLEDCTRL_ADDR, &val);
+	if(retval)
+		printk("error read the PMIC_CHGLEDCTRL.\n");
+	else
+		printk("the PMIC_CHGLEDCTRL is %x .\n",val);
+	//enbale the software control CHGLED
+	val &= 0xF7;
+	retval = intel_scu_ipc_iowrite8(PMIC_CHGLEDCTRL_ADDR, val | 0x07 );
+	if(retval)
+		printk("error write PMIC_CHGLEDCTRL.\n");
+	val = 0;
+	retval = intel_scu_ipc_ioread8(PMIC_CHGLEDCTRL_ADDR, &val);
+	printk("the PMIC_CHGLEDCTRL is %x .\n",val);
+	val = 0;	
+	//enable software control the CHGLED control logic
+	retval = intel_scu_ipc_ioread8(PMIC_CHGLEDFSM_ADDR, &val); 
+	if(retval)
+		printk("error read the PMIC_CHGLEDFSM.\n");
+	else
+		printk("the PMIC_CHGLEDFSM is %x .\n",val);
+	retval = intel_scu_ipc_iowrite8(PMIC_CHGLEDFSM_ADDR, val & 0xF0);
+	if(retval)
+		printk("error write PMIC_CHGLEDFSM.\n");
+	val = 0;
+	retval = intel_scu_ipc_ioread8(PMIC_CHGLEDFSM_ADDR, &val);
+	printk("the PMIC_PMIC_CHGLEDFSM is %x .\n",val);
+}
+
+
 /**
  * pmic_charger_probe - PMIC charger probe function
  * @pdev: pmic platform device structure
@@ -1792,6 +1652,19 @@ static int pmic_chrgr_probe(struct platform_device *pdev)
 
 	if (!pdev)
 		return -ENODEV;
+	//read VLDOCNT reg
+	retval = intel_scu_ipc_ioread8(PMIC_VLDOCNT_ADDR, &val);
+	printk("pmic reg 0x14 is %x\n", val);
+	//set PMIC_VLDOCNT_VREFTEN in reg VLDOCNT
+	retval  = intel_scu_ipc_iowrite8(PMIC_VLDOCNT_ADDR, val | PMIC_VLDOCNT_VREFTEN);
+	//confirm PMIC_VLDOCNT_VREFTEN is set
+	val = 0;
+	retval = intel_scu_ipc_ioread8(PMIC_VLDOCNT_ADDR, &val);
+	printk("pmic reg 0x14 is %x\n", val);
+
+	//md initialize the software controlled CHGLED
+	pmic_enable_swchgled();
+
 
 	chc.health = POWER_SUPPLY_HEALTH_UNKNOWN;
 	chc.dev = &pdev->dev;
@@ -1899,12 +1772,29 @@ static int pmic_chrgr_probe(struct platform_device *pdev)
 		goto otg_req_failed;
 	}
 
+	/* init wireless_en1 pin*/
+	if(!(intel_mid_get_board_id() & HW_BOARD_7_LTE)) {
+		/* For Yate II 8 inch panel  hardware_id_num:0 */
+		wireless_en1 = get_gpio_by_name("WIRELESS_EN1");
+		dev_info(&pdev->dev, " request GPIO [%d].\n",wireless_en1);
+		if(wireless_en1 >= 0) {
+			if (!gpio_is_valid(wireless_en1)) {
+					dev_err(&pdev->dev, "The requested GPIO [%d] is not "
+					"available\n", wireless_en1);
+			}
+
+			retval = gpio_request(wireless_en1, "WIRELESS_EN1");
+			if(retval < 0) {
+				dev_err(&pdev->dev, "Unable to request GPIO [%d].\n",wireless_en1);
+			}
+			gpio_direction_output(wireless_en1, 0);
+		}
+	}
+	
 	INIT_WORK(&chc.evt_work, pmic_event_worker);
 	INIT_LIST_HEAD(&chc.evt_queue);
 	mutex_init(&chc.evt_queue_lock);
 	wake_lock_init(&chc.wakelock, WAKE_LOCK_SUSPEND, "pmic_wakelock");
-	wake_lock_init(&chc.otg_wa_wakelock, WAKE_LOCK_SUSPEND,
-			"pmic_otg_wa_wakelock");
 
 	/* register interrupt */
 	retval = request_threaded_irq(chc.irq, pmic_isr,
@@ -1990,7 +1880,10 @@ static int pmic_chrgr_remove(struct platform_device *pdev)
 	if (chc) {
 		pmic_chrgr_do_exit_ops(chc);
 		wake_lock_destroy(&chc->wakelock);
-		wake_lock_destroy(&chc->otg_wa_wakelock);
+
+		if(!(intel_mid_get_board_id() & HW_BOARD_7_LTE))
+			gpio_free(wireless_en1);
+
 		free_irq(chc->irq, chc);
 		iounmap(chc->pmic_intr_iomap);
 		kfree(chc->sfi_bcprof);

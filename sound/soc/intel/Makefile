@@ -17,3 +17,6 @@ obj-$(CONFIG_SND_SST_MACHINE) += board/
 
 # DSP driver
 obj-$(CONFIG_SND_INTEL_SST) += sst/
+
+# Audio Comms
+obj-$(CONFIG_SND_SOC_COMMS_SSP) += ssp/

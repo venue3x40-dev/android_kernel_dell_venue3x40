@@ -111,6 +111,12 @@ int mdfld_dsi_jdi25x16_ic_init(struct mdfld_dsi_config *dsi_config)
 		    DRM_ERROR("%s: %d: Set brightness\n", __func__, __LINE__);
 		    goto ic_init_err;
 		}
+		err = mdfld_dsi_send_mcs_short_hs(sender, jdi25x16_turn_on_backlight[0],
+				jdi25x16_turn_on_backlight[1], 1, 0);
+		if (err) {
+		    DRM_ERROR("%s: %d: Turn on backlight\n", __func__, __LINE__);
+		    goto ic_init_err;
+		}
 	}
 	sender->work_for_slave_panel = false;
 	return 0;
@@ -173,15 +179,6 @@ int mdfld_dsi_jdi25x16_set_mode(struct mdfld_dsi_config *dsi_config)
 			goto set_mode_err;
 		}
 	}
-
-        msleep(20);
-	err = mdfld_dsi_send_mcs_short_hs(sender, jdi25x16_turn_on_backlight[0],
-			jdi25x16_turn_on_backlight[1], 1, 0);
-	if (err) {
-		DRM_ERROR("%s: %d: Turn on backlight\n", __func__, __LINE__);
-		goto set_mode_err;
-	}
-
 	sender->work_for_slave_panel = false;
 	return 0;
 
@@ -232,9 +229,7 @@ void mdfld_dsi_jdi25x16_dsi_controller_init(struct mdfld_dsi_config *dsi_config)
 
 	/*setup mipi port configuration*/
 	hw_ctx->mipi = MIPI_PORT_EN | PASS_FROM_SPHY_TO_AFE |
-		dsi_config->lane_config |
-		DUAL_LINK_ENABLE | DUAL_LINK_CAPABLE;
-
+		3 | dsi_config->lane_config;
 }
 
 static int mdfld_dsi_jdi25x16_detect(struct mdfld_dsi_config *dsi_config)
@@ -259,7 +254,6 @@ static int mdfld_dsi_jdi25x16_power_on(struct mdfld_dsi_config *dsi_config)
 	struct mdfld_dsi_pkg_sender *sender =
 		mdfld_dsi_get_pkg_sender(dsi_config);
 	int err;
-	int i;
 
 	PSB_DEBUG_ENTRY("\n");
 
@@ -267,31 +261,23 @@ static int mdfld_dsi_jdi25x16_power_on(struct mdfld_dsi_config *dsi_config)
 		DRM_ERROR("Failed to get DSI packet sender\n");
 		return -EINVAL;
 	}
-	for (i = 0; i < 2; i++) {
-		if (i == 0)
-			sender->work_for_slave_panel = false;
-		else
-			sender->work_for_slave_panel = true;
-		/* Sleep Out */
-		err = mdfld_dsi_send_mcs_short_hs(sender, exit_sleep_mode, 0, 0,
-				MDFLD_DSI_SEND_PACKAGE);
-		if (err) {
-			DRM_ERROR("%s: %d: Exit Sleep Mode\n", __func__, __LINE__);
-			goto power_on_err;
-		}
-		msleep(100);
-		/* Send TURN_ON packet */
-		err = mdfld_dsi_send_dpi_spk_pkg_hs(sender, MDFLD_DSI_DPI_SPK_TURN_ON);
-		if (err) {
-			DRM_ERROR("Failed to send turn on packet\n");
-			goto power_on_err;
-		}
+	/* Sleep Out */
+	err = mdfld_dsi_send_mcs_short_hs(sender, exit_sleep_mode, 0, 0,
+			MDFLD_DSI_SEND_PACKAGE);
+	if (err) {
+		DRM_ERROR("%s: %d: Exit Sleep Mode\n", __func__, __LINE__);
+		goto power_on_err;
 	}
-	sender->work_for_slave_panel = false;
+	msleep(100);
+	/* Send TURN_ON packet */
+	err = mdfld_dsi_send_dpi_spk_pkg_hs(sender, MDFLD_DSI_DPI_SPK_TURN_ON);
+	if (err) {
+		DRM_ERROR("Failed to send turn on packet\n");
+		goto power_on_err;
+	}
 	return 0;
 
 power_on_err:
-	sender->work_for_slave_panel = false;
 	err = -EIO;
 	return err;
 }
@@ -319,7 +305,6 @@ static int mdfld_dsi_jdi25x16_power_off(struct mdfld_dsi_config *dsi_config)
 	struct mdfld_dsi_pkg_sender *sender =
 		mdfld_dsi_get_pkg_sender(dsi_config);
 	int err;
-	int i;
 
 	PSB_DEBUG_ENTRY("\n");
 
@@ -327,40 +312,34 @@ static int mdfld_dsi_jdi25x16_power_off(struct mdfld_dsi_config *dsi_config)
 		DRM_ERROR("Failed to get DSI packet sender\n");
 		return -EINVAL;
 	}
-	for (i = 0; i < 2; i++) {
-		if (i == 0)
-			sender->work_for_slave_panel = false;
-		else
-			sender->work_for_slave_panel = true;
-		/*send SHUT_DOWN packet */
-		err = mdfld_dsi_send_dpi_spk_pkg_hs(sender,
-				MDFLD_DSI_DPI_SPK_SHUT_DOWN);
-		if (err) {
-			DRM_ERROR("Failed to send turn off packet\n");
-			goto power_off_err;
-		}
-		/* Set Display off */
-		err = mdfld_dsi_send_mcs_short_hs(sender, set_display_off, 0, 0,
-				MDFLD_DSI_SEND_PACKAGE);
-		if (err) {
-			DRM_ERROR("%s: %d: Set Display On\n", __func__, __LINE__);
-			goto power_off_err;
-		}
-		msleep(20);
-		/* Sleep In */
-		err = mdfld_dsi_send_mcs_short_hs(sender, enter_sleep_mode, 0, 0,
-				MDFLD_DSI_SEND_PACKAGE);
-		if (err) {
-			DRM_ERROR("%s: %d: Exit Sleep Mode\n", __func__, __LINE__);
-			goto power_off_err;
-		}
+
+	/*send SHUT_DOWN packet */
+	err = mdfld_dsi_send_dpi_spk_pkg_hs(sender,
+			MDFLD_DSI_DPI_SPK_SHUT_DOWN);
+	if (err) {
+		DRM_ERROR("Failed to send turn off packet\n");
+		goto power_off_err;
 	}
-	sender->work_for_slave_panel = false;
+
+	/* Set Display off */
+	err = mdfld_dsi_send_mcs_short_hs(sender, set_display_off, 0, 0,
+			MDFLD_DSI_SEND_PACKAGE);
+	if (err) {
+		DRM_ERROR("%s: %d: Set Display On\n", __func__, __LINE__);
+		goto power_off_err;
+	}
+	msleep(20);
+	/* Sleep In */
+	err = mdfld_dsi_send_mcs_short_hs(sender, enter_sleep_mode, 0, 0,
+			MDFLD_DSI_SEND_PACKAGE);
+	if (err) {
+		DRM_ERROR("%s: %d: Exit Sleep Mode\n", __func__, __LINE__);
+		goto power_off_err;
+	}
 	msleep(80);
 	return 0;
 
 power_off_err:
-	sender->work_for_slave_panel = false;
 	err = -EIO;
 	return err;
 }
@@ -420,7 +399,7 @@ static struct drm_display_mode *jdi25x16_vid_get_config_mode(void)
 	mode->hdisplay = 2560;
 
 	mode->hsync_start = mode->hdisplay + 8;
-	mode->hsync_end = mode->hsync_start + 20;
+	mode->hsync_end = mode->hsync_start + 40;
 	mode->htotal = mode->hsync_end + 32;
 
 	mode->vdisplay = 1600;
@@ -452,8 +431,8 @@ static void jdi25x16_vid_get_panel_info(int pipe, struct panel_info *pi)
 		return;
 
 	if (pipe == 0) {
-		pi->width_mm = 192;
-		pi->height_mm = 120;
+		pi->width_mm = PANEL_4DOT3_WIDTH;
+		pi->height_mm = PANEL_4DOT3_HEIGHT;
 	}
 
 	return;

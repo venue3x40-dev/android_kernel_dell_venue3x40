@@ -72,6 +72,34 @@ struct lp855x {
 	struct pwm_device *pwm;
 };
 
+/* FIXME: If the platform has more than one LP855x chip then need
+ * to port the code here.
+ */
+struct lp855x *lpdata;
+
+int lp855x_ext_write_byte(u8 reg, u8 data)
+{
+	if (lpdata == NULL)
+		return -EINVAL;
+
+	return i2c_smbus_write_byte_data(lpdata->client, reg, data);
+}
+
+int lp855x_ext_read_byte(u8 reg)
+{
+	int ret;
+	u8 tmp;
+
+	if (lpdata == NULL)
+		return -EINVAL;
+
+	ret = i2c_smbus_read_byte_data(lpdata->client, reg);
+	if (ret < 0)
+		dev_err(lpdata->dev, "failed to read 0x%.2x\n", reg);
+
+	return ret;
+}
+
 static int lp855x_write_byte(struct lp855x *lp, u8 reg, u8 data)
 {
 	return i2c_smbus_write_byte_data(lp->client, reg, data);
@@ -409,9 +437,17 @@ static int lp855x_probe(struct i2c_client *cl, const struct i2c_device_id *id)
 	if (!i2c_check_functionality(cl->adapter, I2C_FUNC_SMBUS_I2C_BLOCK))
 		return -EIO;
 
+	/* FIXME: If the platform has more than one LP855x chip then need
+	 * to port the code here.
+	 */
+	if (lpdata)
+		return -ENODEV;
+
 	lp = devm_kzalloc(&cl->dev, sizeof(struct lp855x), GFP_KERNEL);
 	if (!lp)
 		return -ENOMEM;
+
+	lpdata = lp;
 
 	if (pdata->period_ns > 0)
 		lp->mode = PWM_BASED;

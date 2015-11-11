@@ -50,6 +50,8 @@
 #define STRING_COLD_RESET           "COLD_RESET"
 #define STRING_COLD_BOOT            "COLD_BOOT"
 
+#define EXT_TIMER0_MSI 15
+
 #define IPC_WATCHDOG 0xF8
 
 enum {
@@ -1164,6 +1166,27 @@ int remove_watchdog_sysfs_files(void)
 	return 0;
 }
 
+static int handle_mrfl_dev_ioapic(int irq)
+{
+	int ret = 0;
+	int ioapic;
+	struct io_apic_irq_attr irq_attr;
+
+	ioapic = mp_find_ioapic(irq);
+	if (ioapic >= 0) {
+		irq_attr.ioapic = ioapic;
+		irq_attr.ioapic_pin = irq;
+		irq_attr.trigger = 1;
+		irq_attr.polarity = 0; /* Active high */
+		io_apic_set_pci_routing(NULL, irq, &irq_attr);
+	} else {
+		pr_warn("can not find interrupt %d in ioapic\n", irq);
+		ret = -EINVAL;
+	}
+
+	return ret;
+}
+
 /* tasklet for configuring watchdog timers on panic */
 static void watchdog_panic_tasklet_body(unsigned long data)
 {
@@ -1200,7 +1223,6 @@ static struct notifier_block watchdog_panic_notifier = {
 static int intel_scu_watchdog_init(void)
 {
 	int ret = 0;
-	unsigned int watchdog_irq;
 
 	watchdog_device.normal_wd_action   = SCU_COLD_RESET_ON_TIMEOUT;
 	watchdog_device.reboot_wd_action   = SCU_COLD_RESET_ON_TIMEOUT;
@@ -1249,20 +1271,15 @@ static int intel_scu_watchdog_init(void)
 		}
 	}
 
-	/* MSI handler to dump registers */
-	watchdog_irq = sfi_get_watchdog_irq();
-	if (watchdog_irq == 0xff) {
-		pr_err("error: sfi_get_watchdog_irq returned %d\n", watchdog_irq);
-		goto error_misc_register;
-	}
-
-	ret = request_irq(watchdog_irq,
+	/* MSI #15 handler to dump registers */
+	handle_mrfl_dev_ioapic(EXT_TIMER0_MSI);
+	ret = request_irq((unsigned int)EXT_TIMER0_MSI,
 		watchdog_warning_interrupt,
 		IRQF_SHARED|IRQF_NO_SUSPEND, "watchdog",
 		&watchdog_device);
 	if (ret) {
 		pr_err("error requesting warning irq %d\n",
-		       watchdog_irq);
+		       EXT_TIMER0_MSI);
 		pr_err("error value returned is %d\n", ret);
 		goto error_misc_register;
 	}

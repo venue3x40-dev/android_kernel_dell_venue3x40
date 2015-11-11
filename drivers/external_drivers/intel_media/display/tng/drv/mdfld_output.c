@@ -37,29 +37,33 @@
 #include "displays/jdi_cmd.h"
 #include "displays/cmi_vid.h"
 #include "displays/cmi_cmd.h"
-#include "displays/sharp10x19_cmd.h"
+#include "displays/sharp5_cmd.h"
 #include "displays/sharp25x16_vid.h"
 #include "displays/sharp25x16_cmd.h"
-#include "displays/sdc16x25_8_cmd.h"
-#include "displays/sdc25x16_cmd.h"
 #include "displays/jdi25x16_vid.h"
-#include "displays/jdi25x16_cmd.h"
 #include "psb_drv.h"
 #include "android_hdmi.h"
+
+extern  cpt_7_inch_vid_init(struct drm_device *dev, struct panel_funcs *p_funcs);
+extern  auo_7_inch_vid_init(struct drm_device *dev, struct panel_funcs *p_funcs);
+extern  auo_8inch_vid_init(struct drm_device *dev, struct panel_funcs *p_funcs);
+extern  auo_vid_init(struct drm_device *dev, struct panel_funcs *p_funcs);
+extern  ino_12x192_8inch_vid_init(struct drm_device *dev, struct panel_funcs *p_funcs);
 
 static struct intel_mid_panel_list panel_list[] = {
 	{JDI_7x12_VID, MDFLD_DSI_ENCODER_DPI, jdi_vid_init},
 	{JDI_7x12_CMD, MDFLD_DSI_ENCODER_DBI, jdi_cmd_init},
 	{CMI_7x12_VID, MDFLD_DSI_ENCODER_DPI, cmi_vid_init},
 	{CMI_7x12_CMD, MDFLD_DSI_ENCODER_DBI, cmi_cmd_init},
-	{SHARP_10x19_CMD, MDFLD_DSI_ENCODER_DBI, sharp10x19_cmd_init},
-	{SHARP_10x19_DUAL_CMD, MDFLD_DSI_ENCODER_DBI, sharp10x19_cmd_init},
+	{SHARP_10x19_CMD, MDFLD_DSI_ENCODER_DBI, sharp5_cmd_init},
 	{SHARP_25x16_VID, MDFLD_DSI_ENCODER_DPI, sharp25x16_vid_init},
 	{SHARP_25x16_CMD, MDFLD_DSI_ENCODER_DBI, sharp25x16_cmd_init},
 	{JDI_25x16_VID, MDFLD_DSI_ENCODER_DPI, jdi25x16_vid_init},
-	{JDI_25x16_CMD, MDFLD_DSI_ENCODER_DBI, jdi25x16_cmd_init},
-	{SDC_16x25_CMD, MDFLD_DSI_ENCODER_DBI, sdc16x25_8_cmd_init},
-	{SDC_25x16_CMD, MDFLD_DSI_ENCODER_DBI, sdc25x16_cmd_init},
+	{AUO_7INCH, MDFLD_DSI_ENCODER_DPI, auo_7_inch_vid_init},
+	{CPT_7INCH, MDFLD_DSI_ENCODER_DPI, cpt_7_inch_vid_init},
+	{AUO_8INCH_VID, MDFLD_DSI_ENCODER_DPI, auo_vid_init},
+	{INO_12x192_8INCH_VID, MDFLD_DSI_ENCODER_DPI, ino_12x192_8inch_vid_init},
+	{AUO_1920_VID, MDFLD_DSI_ENCODER_DPI, auo_8inch_vid_init},
 };
 
 enum panel_type get_panel_type(struct drm_device *dev, int pipe)
@@ -74,18 +78,7 @@ bool is_dual_dsi(struct drm_device *dev)
 {
 	if ((get_panel_type(dev, 0) == SHARP_25x16_VID) ||
 		(get_panel_type(dev, 0) == SHARP_25x16_CMD) ||
-		(get_panel_type(dev, 0) == SHARP_10x19_DUAL_CMD) ||
-		(get_panel_type(dev, 0) == SDC_16x25_CMD) ||
-		(get_panel_type(dev, 0) == SDC_25x16_CMD) ||
-		(get_panel_type(dev, 0) == JDI_25x16_CMD) ||
 		(get_panel_type(dev, 0) == JDI_25x16_VID))
-		return true;
-	else return false;
-}
-
-bool is_dual_panel(struct drm_device *dev)
-{
-	if (get_panel_type(dev, 0) == SHARP_10x19_DUAL_CMD)
 		return true;
 	else return false;
 }

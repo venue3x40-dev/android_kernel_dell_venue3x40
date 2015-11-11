@@ -123,6 +123,62 @@ static int get_emmc0_cid(void)
 	return 0;
 }
 
+
+static void set_cmdline_serialno(void)
+{
+	char *start;
+	char *serialno;
+	char *end_of_field;
+	int serialno_len;
+	int value_length;
+	char SERIALNO_CMDLINE[] = "androidboot.serialno=";
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0))
+	if (intel_platform_ssn[0] != '\0') {
+		serialno = intel_platform_ssn;
+#else
+	if (intel_mid_ssn[0] != '\0') {
+		serialno = intel_mid_ssn;
+#endif
+	} else {
+		if (strlen(emmc0_id)) {
+			serialno = emmc0_id;
+		} else {
+			pr_err("Failed to get SSN or emmc0 ID\n");
+			goto error;
+		}
+	}
+
+	start = strstr(saved_command_line, SERIALNO_CMDLINE);
+	if (!start) {
+		pr_err("Could not find %s in cmdline\n", SERIALNO_CMDLINE);
+		goto error;
+	}
+
+	serialno_len = strlen(serialno);
+
+	start += sizeof(SERIALNO_CMDLINE) - 1;
+
+	end_of_field = strstr(start, " ");
+	if (end_of_field)
+		value_length = end_of_field - start;
+	else
+		value_length = strlen(start);
+
+	if (value_length < serialno_len) {
+		pr_err("Pre-filled serialno cmdline value is too small\n");
+		goto error;
+	}
+
+	memcpy(start, serialno, serialno_len);
+	memset(start + serialno_len, ' ', value_length - serialno_len);
+
+	return;
+error:
+	pr_err("serialno will not be updated in cmdline!\n");
+	return;
+}
+
 static int __init uuid_init(void)
 {
 
@@ -136,6 +192,8 @@ static int __init uuid_init(void)
 			return -ENOMEM;
 		}
 	}
+
+	set_cmdline_serialno();
 
 	return 0;
 }

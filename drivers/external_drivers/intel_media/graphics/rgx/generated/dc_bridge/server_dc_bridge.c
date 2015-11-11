@@ -1453,30 +1453,6 @@ DCDisplayContextConfigure_exit:
 }
 
 static IMG_INT
-PVRSRVBridgeDCDisplayContextFlush(IMG_UINT32 ui32BridgeID,
-					 PVRSRV_BRIDGE_IN_DCDISPLAYCONTEXTFLUSH *psDCDisplayContextFlushIN,
-					 PVRSRV_BRIDGE_OUT_DCDISPLAYCONTEXTFLUSH *psDCDisplayContextFlushOUT,
-					 CONNECTION_DATA *psConnection)
-
-{
-	IMG_HANDLE hDisplayContextInt2 = IMG_NULL;
-
-	PVRSRV_BRIDGE_ASSERT_CMD(ui32BridgeID, PVRSRV_BRIDGE_DC_DCDISPLAYCONTEXTFLUSH);
-
-	psDCDisplayContextFlushOUT->eError = DCDisplayContextFlush();
-
-	/* Exit early if bridged call fails */
-	if(psDCDisplayContextFlushOUT->eError != PVRSRV_OK)
-	{
-		goto DCDisplayContextFlush_exit;
-	}
-
-DCDisplayContextFlush_exit:
-
-	return 0;
-}
-
-static IMG_INT
 PVRSRVBridgeDCDisplayContextDestroy(IMG_UINT32 ui32BridgeID,
 					 PVRSRV_BRIDGE_IN_DCDISPLAYCONTEXTDESTROY *psDCDisplayContextDestroyIN,
 					 PVRSRV_BRIDGE_OUT_DCDISPLAYCONTEXTDESTROY *psDCDisplayContextDestroyOUT,
@@ -2894,22 +2870,6 @@ compat_PVRSRVBridgeDCDisplayContextDestroy(IMG_UINT32 ui32BridgeID,
 					psDCDisplayContextDestroyOUT, psConnection);
 }
 
-typedef struct compat_PVRSRV_BRIDGE_IN_DCDISPLAYCONTEXTFLUSH_TAG
-{
-	IMG_UINT32 ui32Empty;
-} compat_PVRSRV_BRIDGE_IN_DCDISPLAYCONTEXTFLUSH;
-
-static IMG_INT
-compat_PVRSRVBridgeDCDisplayContextFlush(IMG_UINT32 ui32BridgeID,
-					 compat_PVRSRV_BRIDGE_IN_DCDISPLAYCONTEXTFLUSH *psDCDisplayContextFlushIN_32,
-					 PVRSRV_BRIDGE_OUT_DCDISPLAYCONTEXTFLUSH *psDCDisplayContextFlushOUT,
-					 CONNECTION_DATA *psConnection)
-{
-	PVRSRV_BRIDGE_IN_DCDISPLAYCONTEXTFLUSH sDCDisplayContextFlushIN;
-
-	return PVRSRVBridgeDCDisplayContextFlush(ui32BridgeID, &sDCDisplayContextFlushIN, psDCDisplayContextFlushOUT, psConnection);
-}
-
 /*******************************************
             DCBufferAlloc
  *******************************************/
@@ -3292,7 +3252,6 @@ PVRSRV_ERROR RegisterDCFunctions(IMG_VOID)
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DC_DCBUFFERUNPIN, compat_PVRSRVBridgeDCBufferUnpin);
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DC_DCBUFFERACQUIRE, compat_PVRSRVBridgeDCBufferAcquire);
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DC_DCBUFFERRELEASE, compat_PVRSRVBridgeDCBufferRelease);
-	SetDispatchTableEntry(PVRSRV_BRIDGE_DC_DCDISPLAYCONTEXTFLUSH, compat_PVRSRVBridgeDCDisplayContextFlush);
 #else
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DC_DCDEVICESQUERYCOUNT, PVRSRVBridgeDCDevicesQueryCount);
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DC_DCDEVICESENUMERATE, PVRSRVBridgeDCDevicesEnumerate);
@@ -3320,7 +3279,6 @@ PVRSRV_ERROR RegisterDCFunctions(IMG_VOID)
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DC_DCBUFFERUNPIN, PVRSRVBridgeDCBufferUnpin);
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DC_DCBUFFERACQUIRE, PVRSRVBridgeDCBufferAcquire);
 	SetDispatchTableEntry(PVRSRV_BRIDGE_DC_DCBUFFERRELEASE, PVRSRVBridgeDCBufferRelease);
-	SetDispatchTableEntry(PVRSRV_BRIDGE_DC_DCDISPLAYCONTEXTFLUSH, PVRSRVBridgeDCDisplayContextFlush);
 #endif
 	return PVRSRV_OK;
 }

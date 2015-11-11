@@ -21,7 +21,6 @@ enum tp2e_ev_type {
 
 #define NAME_MAX_LEN 16
 #define DATA_MAX_LEN 128
-#define FILELIST_MAX_LEN 256
 
 #define show_tp2e_ev_type(type)			\
 	__print_symbolic(type,				\
@@ -30,7 +29,7 @@ enum tp2e_ev_type {
 			 { TP2E_EV_ERROR, "ERROR" },	\
 			 { TP2E_EV_CRASH, "CRASH" })
 
-DECLARE_EVENT_CLASS(tp2e_generic_class,
+TRACE_EVENT(tp2e_generic_event,
 
 	    TP_PROTO(
 		    enum tp2e_ev_type ev_type,
@@ -41,13 +40,12 @@ DECLARE_EVENT_CLASS(tp2e_generic_class,
 		    char *data2,
 		    char *data3,
 		    char *data4,
-		    char *data5,
-		    char *filelist
+		    char *data5
 		    ),
 
 	    TP_ARGS(
 		    ev_type, submitter_name, ev_name,
-		    data0, data1, data2, data3, data4, data5, filelist
+		    data0, data1, data2, data3, data4, data5
 		    ),
 
 	    TP_STRUCT__entry(
@@ -60,7 +58,6 @@ DECLARE_EVENT_CLASS(tp2e_generic_class,
 		    __array(char, data3, DATA_MAX_LEN)
 		    __array(char, data4, DATA_MAX_LEN)
 		    __array(char, data5, DATA_MAX_LEN)
-		    __array(char, filelist, FILELIST_MAX_LEN)
 		    ),
 
 	    TP_fast_assign(
@@ -73,7 +70,6 @@ DECLARE_EVENT_CLASS(tp2e_generic_class,
 		    strncpy(__entry->data3, data3, DATA_MAX_LEN);
 		    strncpy(__entry->data4, data4, DATA_MAX_LEN);
 		    strncpy(__entry->data5, data5, DATA_MAX_LEN);
-		    strncpy(__entry->filelist, filelist, FILELIST_MAX_LEN);
 		    ),
 
 	    TP_printk("type=%s submitter_name=%s name=%s data0=%s data1=%s data2=%s data3=%s data4=%s data5=%s",
@@ -82,46 +78,6 @@ DECLARE_EVENT_CLASS(tp2e_generic_class,
 		      __entry->data0, __entry->data1, __entry->data2,
 		      __entry->data3, __entry->data4, __entry->data5
 		    )
-	);
-
-DEFINE_EVENT(tp2e_generic_class, tp2e_generic_event,
-	TP_PROTO(
-		enum tp2e_ev_type ev_type,
-		char *submitter_name,
-		char *ev_name,
-		char *data0,
-		char *data1,
-		char *data2,
-		char *data3,
-		char *data4,
-		char *data5,
-		char *filelist
-		),
-
-	TP_ARGS(
-		ev_type, submitter_name, ev_name,
-		data0, data1, data2, data3, data4, data5, filelist
-		)
-	);
-
-DEFINE_EVENT(tp2e_generic_class, tp2e_scu_recov_event,
-	TP_PROTO(
-		enum tp2e_ev_type ev_type,
-		char *submitter_name,
-		char *ev_name,
-		char *data0,
-		char *data1,
-		char *data2,
-		char *data3,
-		char *data4,
-		char *data5,
-		char *filelist
-		),
-
-	TP_ARGS(
-		ev_type, submitter_name, ev_name,
-		data0, data1, data2, data3, data4, data5, filelist
-		)
 	);
 
 #endif /* _TRACE_TP2E_H || TRACE_HEADER_MULTI_READ */

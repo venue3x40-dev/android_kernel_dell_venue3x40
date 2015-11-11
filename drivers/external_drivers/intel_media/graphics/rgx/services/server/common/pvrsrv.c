@@ -1811,9 +1811,17 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVWaitForValueKM (volatile IMG_UINT32	*pui32LinMem
 		{
 			/* wait for event and retry */
 			eErrorWait = OSEventObjectWait(hOSEvent);
-            		if (eErrorWait != PVRSRV_OK && eErrorWait != PVRSRV_ERROR_TIMEOUT)
+			if (eErrorWait == PVRSRV_ERROR_TIMEOUT)
 			{
-				PVR_DPF((PVR_DBG_ERROR,"PVRSRVWaitForValueKM: Waiting for value failed with error %d. Expected 0x%x but found 0x%x (Mask 0x%08x). Retrying",
+				psPVRSRVData->ui32GEOConsecutiveTimeouts++;
+			}
+			else if (eErrorWait == PVRSRV_OK)
+			{
+				psPVRSRVData->ui32GEOConsecutiveTimeouts = 0;
+			}
+			else
+			{
+				PVR_DPF((PVR_DBG_WARNING,"PVRSRVWaitForValueKM: Waiting for value failed with error %d. Expected 0x%x but found 0x%x (Mask 0x%08x). Retrying",
 							eErrorWait,
 							ui32Value,
 							ui32ActualValue,
@@ -1830,14 +1838,6 @@ PVRSRV_ERROR IMG_CALLCONV PVRSRVWaitForValueKM (volatile IMG_UINT32	*pui32LinMem
 		eError = PVRSRV_OK;
 	}
 
-    if (eError != PVRSRV_OK)
-    {
-        psPVRSRVData->ui32GEOConsecutiveTimeouts++;
-    }
-    else
-    {
-        psPVRSRVData->ui32GEOConsecutiveTimeouts = 0;
-    }
 EventObjectOpenError:
 
 	return eError;

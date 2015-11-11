@@ -20,13 +20,8 @@
 
 #include "intel_soc_pmu.h"
 
-u8 __iomem *s0ix_counters;
-
-int s0ix_counter_reg_map[] = {0x0, 0xAC, 0xB0, 0xA8, 0xA4, 0xC0,
-	0xBC, 0xB8, 0xB4, 0x8C, 0x90, 0x98};
-
-int s0ix_residency_reg_map[] = {0x0, 0xD8, 0xE0, 0xD0, 0xC8, 0x100,
-	0xF8, 0xF0, 0xE8, 0x68, 0x70, 0x80};
+u32 __iomem *residency[SYS_STATE_MAX];
+u32 __iomem *s0ix_counter[SYS_STATE_MAX];
 
 /* list of north complex devices */
 char *mrfl_nc_devices[] = {
@@ -63,6 +58,12 @@ static int mrfld_pmu_init(void)
 				SSMSK(D0I3_MASK, PMU_RESERVED_LSS_14)	|
 				SSMSK(D0I3_MASK, PMU_RESERVED_LSS_15));
 
+	/* Put LSS8 as unused on PRh */
+	if (INTEL_MID_BOARD(3, PHONE, MRFL, BB, PRO, PRHA)) {
+		mid_pmu_cxt->os_sss[0] |= \
+			SSMSK(D0I3_MASK, PMU_USB_MPH_LSS_08);
+	}
+
 	mid_pmu_cxt->os_sss[1] = (SSMSK(D0I3_MASK, PMU_RESERVED_LSS_16-16)|
 				SSMSK(D0I3_MASK, PMU_SSP3_LSS_17-16)|
 				SSMSK(D0I3_MASK, PMU_SSP6_LSS_19-16)|
@@ -76,11 +77,38 @@ static int mrfld_pmu_init(void)
 
 	mid_pmu_cxt->os_sss[2] &= ~SSMSK(D0I3_MASK, PMU_SSP4_LSS_35-32);
 
-	s0ix_counters = devm_ioremap_nocache(&mid_pmu_cxt->pmu_dev->dev,
-		S0IX_COUNTERS_BASE, S0IX_COUNTERS_SIZE);
-	if (!s0ix_counters)
-		goto err;
+	/* Map S0ix residency counters */
+	residency[SYS_STATE_S0I1] = ioremap_nocache(S0I1_RES_ADDR, sizeof(u64));
+	if (residency[SYS_STATE_S0I1] == NULL)
+		goto err1;
+	residency[SYS_STATE_LPMP3] = ioremap_nocache(LPMP3_RES_ADDR,
+								sizeof(u64));
+	if (residency[SYS_STATE_LPMP3] == NULL)
+		goto err2;
+	residency[SYS_STATE_S0I2] = ioremap_nocache(S0I2_RES_ADDR, sizeof(u64));
+	if (residency[SYS_STATE_S0I2] == NULL)
+		goto err3;
+	residency[SYS_STATE_S0I3] = ioremap_nocache(S0I3_RES_ADDR, sizeof(u64));
+	if (residency[SYS_STATE_S0I3] == NULL)
+		goto err4;
 
+	/* Map S0ix iteration counters */
+	s0ix_counter[SYS_STATE_S0I1] = ioremap_nocache(S0I1_COUNT_ADDR,
+								sizeof(u32));
+	if (s0ix_counter[SYS_STATE_S0I1] == NULL)
+		goto err5;
+	s0ix_counter[SYS_STATE_LPMP3] = ioremap_nocache(LPMP3_COUNT_ADDR,
+								sizeof(u32));
+	if (s0ix_counter[SYS_STATE_LPMP3] == NULL)
+		goto err6;
+	s0ix_counter[SYS_STATE_S0I2] = ioremap_nocache(S0I2_COUNT_ADDR,
+								sizeof(u32));
+	if (s0ix_counter[SYS_STATE_S0I2] == NULL)
+		goto err7;
+	s0ix_counter[SYS_STATE_S0I3] = ioremap_nocache(S0I3_COUNT_ADDR,
+								sizeof(u32));
+	if (s0ix_counter[SYS_STATE_S0I3] == NULL)
+		goto err8;
 	/* Keep PSH LSS's 00, 33, 34 in D0i0 if PM is disabled */
 	if (!enable_s0ix && !enable_s3) {
 		mid_pmu_cxt->os_sss[2] &=
@@ -96,7 +124,31 @@ static int mrfld_pmu_init(void)
 
 	return PMU_SUCCESS;
 
-err:
+err8:
+	iounmap(s0ix_counter[SYS_STATE_S0I3]);
+	s0ix_counter[SYS_STATE_S0I3] = NULL;
+err7:
+	iounmap(s0ix_counter[SYS_STATE_S0I2]);
+	s0ix_counter[SYS_STATE_S0I2] = NULL;
+err6:
+	iounmap(s0ix_counter[SYS_STATE_LPMP3]);
+	s0ix_counter[SYS_STATE_LPMP3] = NULL;
+err5:
+	iounmap(s0ix_counter[SYS_STATE_S0I1]);
+	s0ix_counter[SYS_STATE_S0I1] = NULL;
+err4:
+	iounmap(residency[SYS_STATE_S0I3]);
+	residency[SYS_STATE_S0I3] = NULL;
+err3:
+	iounmap(residency[SYS_STATE_S0I2]);
+	residency[SYS_STATE_S0I2] = NULL;
+err2:
+	iounmap(residency[SYS_STATE_LPMP3]);
+	residency[SYS_STATE_LPMP3] = NULL;
+err1:
+	iounmap(residency[SYS_STATE_S0I1]);
+	residency[SYS_STATE_S0I1] = NULL;
+
 	pr_err("Cannot map memory to read S0ix residency and count\n");
 	return PMU_FAILED;
 }
@@ -190,15 +242,19 @@ void platform_update_all_lss_states(struct pmu_ss_states *pmu_config,
 				SSMSK(D0I3_MASK, PMU_RESERVED_LSS_14)	|
 				SSMSK(D0I3_MASK, PMU_RESERVED_LSS_15));
 
+	/* Put LSS8 as unused on PRh */
+	if (INTEL_MID_BOARD(3, PHONE, MRFL, BB, PRO, PRHA)) {
+		pmu_config->pmu2_states[0] |= \
+			SSMSK(D0I3_MASK, PMU_USB_MPH_LSS_08);
+	}
+
 	pmu_config->pmu2_states[1] =
 				(SSMSK(D0I3_MASK, PMU_RESERVED_LSS_16-16)|
 				SSMSK(D0I3_MASK, PMU_SSP3_LSS_17-16)|
+				SSMSK(D0I3_MASK, PMU_SSP6_LSS_19-16)|
 				SSMSK(D0I3_MASK, PMU_USB_OTG_LSS_28-16)	|
 				SSMSK(D0I3_MASK, PMU_RESERVED_LSS_29-16)|
 				SSMSK(D0I3_MASK, PMU_RESERVED_LSS_30-16));
-	if (platform_is(INTEL_ATOM_MRFLD))
-		pmu_config->pmu2_states[1] |=
-				SSMSK(D0I3_MASK, PMU_SSP6_LSS_19-16);
 
 	pmu_config->pmu2_states[0] &= ~IGNORE_SSS0;
 	pmu_config->pmu2_states[1] &= ~IGNORE_SSS1;
@@ -297,12 +353,8 @@ static int wait_for_nc_pmcmd_complete(int verify_mask,
 		}
 
 		count++;
-		if (count > 500000) {
-			pr_err("PUnit Timeout, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x\n",
-				verify_mask, status_mask, state_type, reg,
-				intel_mid_msgbus_read32(PUNIT_PORT, reg));
-			panic("punit timeout");
-		}
+		if (WARN_ONCE(count > 500000, "Timed out waiting for P-Unit"))
+			return -EBUSY;
 	}
 	return 0;
 }
@@ -325,16 +377,12 @@ static int mrfld_nc_set_power_state(int islands, int state_type,
 		if (lss) {
 			mask = D0I3_MASK << (BITS_PER_LSS * i);
 			status_mask = status_mask | mask;
-			if (state_type == OSPM_ISLAND_DOWN) {
+			if (state_type == OSPM_ISLAND_DOWN)
 				pwr_mask |= mask;
-				mid_pmu_cxt->nc_d0i0_time[i] +=
-					(cpu_clock(0) - mid_pmu_cxt->nc_d0i0_prev_time[i]);
-			} else if (state_type == OSPM_ISLAND_UP) {
-				mid_pmu_cxt->nc_d0i0_count[i]++;
+			else if (state_type == OSPM_ISLAND_UP)
 				pwr_mask &= ~mask;
-				mid_pmu_cxt->nc_d0i0_prev_time[i] = cpu_clock(0);
 			/* Soft reset case */
-			} else if (state_type == OSPM_ISLAND_SR) {
+			else if (state_type == OSPM_ISLAND_SR) {
 				pwr_mask &= ~mask;
 				mask = SR_MASK << (BITS_PER_LSS * i);
 				pwr_mask |= mask;
@@ -353,24 +401,6 @@ static int mrfld_nc_set_power_state(int islands, int state_type,
 	}
 
 	return ret;
-}
-
-/* Provide s0i1-display vote to display driver. We add this operation in pmu
- * driver to sync operation with display island power on/off with touching
- * the same register.
- * register also defined:  linux/modules/intel_media/display/tng/drv/pmu_tng.h */
-#define DSP_SS_PM 0x36
-#define PUNIT_DSPSSPM_ENABLE_S0i1_DISPLAY     (1<<8)
-static void set_s0i1_disp_vote(bool enable)
-{
-	u32 dsp_ss_pm_val = intel_mid_msgbus_read32(PUNIT_PORT, DSP_SS_PM);
-
-	if (enable)
-		dsp_ss_pm_val |= PUNIT_DSPSSPM_ENABLE_S0i1_DISPLAY;
-	else
-		dsp_ss_pm_val &= ~PUNIT_DSPSSPM_ENABLE_S0i1_DISPLAY;
-
-	intel_mid_msgbus_write32(PUNIT_PORT, DSP_SS_PM, dsp_ss_pm_val);
 }
 
 void s0ix_complete(void)
@@ -409,12 +439,10 @@ ret:
 }
 EXPORT_SYMBOL(could_do_s0ix);
 
-
 struct platform_pmu_ops mrfld_pmu_ops = {
 	.init	 = mrfld_pmu_init,
 	.enter	 = mrfld_pmu_enter,
 	.set_s0ix_complete = s0ix_complete,
-	.set_s0i1_disp_vote = set_s0i1_disp_vote,
 	.nc_set_power_state = mrfld_nc_set_power_state,
 	.check_nc_sc_status = mrfld_nc_sc_status_check,
 };

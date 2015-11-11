@@ -12,6 +12,37 @@
 
 extern __read_mostly int scheduler_running;
 
+#ifdef CONFIG_CPU_SHIELDING
+#define NR_MODULES		(NR_CPUS / CONFIG_NR_CORES_PER_MODULE)
+#define MAX_SHIELD_LEVEL	(NR_MODULES - 1)
+#define SHIELD_LWM_THRESH 20
+#define SHIELD_HWM_THRESH 80
+
+struct module_info {
+	unsigned int	shield_stat;
+	unsigned int	unshield_stat;
+	ktime_t		ktime_entry;
+	ktime_t		module_residency;
+};
+
+struct cpu_shield_info {
+	cpumask_var_t	shield_mask;
+	unsigned int	nr_module_shielded;
+	ktime_t		ktime_offset;
+	struct module_info	*info;
+};
+extern int get_module_utilization(int);
+#else
+static inline int get_module_utilization(int module)
+{
+	return 0;
+}
+#endif
+
+
+extern bool is_this_cpu_shielded(int cpu);
+
+extern struct cpu_shield_info shield_info;
 /*
  * Convert user-nice values [ -20 ... 0 ... 19 ]
  * to static priority [ MAX_RT_PRIO..MAX_PRIO-1 ],
@@ -387,22 +418,6 @@ extern struct root_domain def_root_domain;
 
 #endif /* CONFIG_SMP */
 
-#ifdef CONFIG_CPU_CONCURRENCY
-struct cpu_concurrency_t {
-	u64 sum;
-	u64 sum_now;
-	u64 contrib;
-	u64 sum_timestamp;
-	u64 contrib_timestamp;
-	unsigned long nr_running;
-#ifdef CONFIG_WORKLOAD_CONSOLIDATION
-	int unload;
-	int dst_cpu;
-	struct cpu_stop_work unload_work;
-#endif
-};
-#endif
-
 /*
  * This is the main, per-CPU runqueue data structure.
  *
@@ -537,10 +552,6 @@ struct rq {
 #endif
 
 	struct sched_avg avg;
-
-#ifdef CONFIG_CPU_CONCURRENCY
-	struct cpu_concurrency_t concurrency;
-#endif
 };
 
 static inline int cpu_of(struct rq *rq)
@@ -1077,22 +1088,6 @@ extern void init_sched_fair_class(void);
 
 extern void resched_task(struct task_struct *p);
 extern void resched_cpu(int cpu);
-
-#ifdef CONFIG_CPU_CONCURRENCY
-extern void init_cpu_concurrency(struct rq *rq);
-extern void update_cpu_concurrency(struct rq *rq);
-#ifdef CONFIG_WORKLOAD_CONSOLIDATION
-extern int workload_consolidation_wakeup(int prev, int target);
-extern struct sched_group *
-workload_consolidation_find_group(struct sched_domain *sd, struct task_struct *p, int this_cpu);
-extern void workload_consolidation_unload(struct cpumask *nonshielded);
-extern int workload_consolidation_cpu_shielded(int cpu);
-extern void workload_consolidation_nonshielded_mask(int cpu, struct cpumask *mask);
-#endif
-#else
-static inline void init_cpu_concurrency(struct rq *rq) {}
-static inline void update_cpu_concurrency(struct rq *rq) {}
-#endif
 
 extern struct rt_bandwidth def_rt_bandwidth;
 extern void init_rt_bandwidth(struct rt_bandwidth *rt_b, u64 period, u64 runtime);

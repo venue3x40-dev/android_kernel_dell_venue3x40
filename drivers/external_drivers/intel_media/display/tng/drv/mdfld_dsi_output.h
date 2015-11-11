@@ -245,9 +245,6 @@ struct mdfld_dsi_hw_context {
 	u32 ddl3;
 	u32 ddl4;
 
-	u32 dsparb;
-	u32 dsparb2;
-
 	/*overlay*/
 	u32 ovaadd;
 	u32 ovcadd;

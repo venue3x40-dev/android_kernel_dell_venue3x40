@@ -991,26 +991,26 @@ static struct notifier_block panic_blk = {
 	.priority = 100,
 };
 
+static int panic_dbg_get(void *data, u64 *val)
+{
+	emmc_ipanic(NULL, 0, NULL);
+	return 0;
+}
+
 static int panic_dbg_set(void *data, u64 val)
 {
 	BUG();
 	return -1;
 }
 
-DEFINE_SIMPLE_ATTRIBUTE(panic_dbg_fops, NULL, panic_dbg_set, "%llu\n");
+DEFINE_SIMPLE_ATTRIBUTE(panic_dbg_fops, panic_dbg_get, panic_dbg_set, "%llu\n");
 
 static int match_dev_panic_part(struct device *dev, const void *data)
 {
-	struct hd_struct *part;
+	struct hd_struct *part = dev_to_part(dev);
 	const char *name = (char *)data;
 
-	if (!name || !dev || dev->class != &block_class)
-		return 0;
-
-	part = dev_to_part(dev);
-
-	return part->info && part->info->volname &&
-		!strcmp(name, part->info->volname);
+	return part->info && !strcmp(name, part->info->volname);
 }
 
 static int emmc_panic_partition_notify(struct notifier_block *nb,

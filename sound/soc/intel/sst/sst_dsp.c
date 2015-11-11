@@ -489,18 +489,34 @@ static int sst_alloc_dma_chan(struct sst_dma *dma)
 	struct intel_mid_dma_slave *slave = &dma->slave;
 	int retval;
 	struct pci_dev *dmac = NULL;
+	const char *hid;
 
 	pr_debug("%s\n", __func__);
 	dma->dev = NULL;
 	dma_cap_zero(mask);
 	dma_cap_set(DMA_MEMCPY, mask);
 
-	if (sst_drv_ctx->pci_id == SST_MRFLD_PCI_ID)
+	if (sst_drv_ctx->pci_id == SST_CLV_PCI_ID)
+		dmac = pci_get_device(PCI_VENDOR_ID_INTEL,
+				      PCI_DMAC_CLV_ID, NULL);
+	else if (sst_drv_ctx->pci_id == SST_MRFLD_PCI_ID)
 		dmac = pci_get_device(PCI_VENDOR_ID_INTEL,
 				      PCI_DMAC_MRFLD_ID, NULL);
 	else if (sst_drv_ctx->pci_id == PCI_DEVICE_ID_INTEL_SST_MOOR)
 		dmac = pci_get_device(PCI_VENDOR_ID_INTEL,
 			      PCI_DEVICE_ID_INTEL_AUDIO_DMAC0_MOOR, NULL);
+	else if (sst_drv_ctx->pci_id == SST_BYT_PCI_ID ||
+			sst_drv_ctx->pci_id == SST_CHT_PCI_ID) {
+		hid = sst_drv_ctx->hid;
+		if (!strncmp(hid, "LPE0F281", 8))
+			dma->dev = intel_mid_get_acpi_dma("DMA0F28");
+		else if (!strncmp(hid, "80860F28", 8))
+			dma->dev = intel_mid_get_acpi_dma("ADMA0F28");
+		else if (!strncmp(hid, "808622A8", 8))
+			dma->dev = intel_mid_get_acpi_dma("ADMA22A8");
+		else if (!strncmp(hid, "LPE0F28", 7))
+			dma->dev = intel_mid_get_acpi_dma("DMA0F28");
+	}
 
 	if (!dmac && !dma->dev) {
 		pr_err("Can't find DMAC\n");
@@ -576,7 +592,9 @@ static int sst_dma_firmware(struct sst_dma *dma, struct sst_sg_list *sg_list)
 	 */
 	/*FIXME: Need to check if this workaround is valid for CHT*/
 	if (sst_drv_ctx->pci_id == SST_MRFLD_PCI_ID ||
-	    sst_drv_ctx->pci_id == PCI_DEVICE_ID_INTEL_SST_MOOR)
+	    sst_drv_ctx->pci_id == SST_BYT_PCI_ID ||
+	    sst_drv_ctx->pci_id == PCI_DEVICE_ID_INTEL_SST_MOOR ||
+			sst_drv_ctx->pci_id == SST_CHT_PCI_ID)
 		sst_shim_write(sst_drv_ctx->shim, SST_PIMR, 0xFFFF0034);
 
 	if (sst_drv_ctx->use_lli) {
@@ -786,11 +804,10 @@ static int sst_parse_module_dma(struct intel_sst_drv *sst_ctx,
 	block = (void *)module + sizeof(*module);
 
 	for (count = 0; count < module->blocks; count++) {
-		if (block->type != SST_CUSTOM_INFO) {
-			sg_len += (block->size) / sst_drv_ctx->info.dma_max_len;
-			if (block->size % sst_drv_ctx->info.dma_max_len)
-				sg_len = sg_len + 1;
-		}
+		sg_len += (block->size) / sst_drv_ctx->info.dma_max_len;
+
+		if (block->size % sst_drv_ctx->info.dma_max_len)
+			sg_len = sg_len + 1;
 		block = (void *)block + sizeof(*block) + block->size;
 	}
 
@@ -818,12 +835,6 @@ static int sst_parse_module_dma(struct intel_sst_drv *sst_ctx,
 		case SST_DRAM:
 			ram = sst_ctx->dram_base;
 			break;
-		case SST_DDR:
-			ram = sst_drv_ctx->ddr_base;
-			break;
-		case SST_CUSTOM_INFO:
-			block = (void *)block + sizeof(*block) + block->size;
-			continue;
 		default:
 			pr_err("wrong ram type0x%x in block0x%x\n",
 					block->type, count);
@@ -1048,12 +1059,6 @@ static int sst_parse_module_memcpy(struct fw_module_header *module,
 		case SST_DRAM:
 			ram_iomem = sst_drv_ctx->dram;
 			break;
-		case SST_DDR:
-			ram_iomem = sst_drv_ctx->ddr;
-			break;
-		case SST_CUSTOM_INFO:
-			block = (void *)block + sizeof(*block) + block->size;
-			continue;
 		default:
 			pr_err("wrong ram type0x%x in block0x%x\n",
 					block->type, count);
@@ -1165,14 +1170,12 @@ void sst_firmware_load_cb(const struct firmware *fw, void *context)
 
 	if (fw == NULL) {
 		pr_err("request fw failed\n");
-		return;
+		goto out;
 	}
 
-	mutex_lock(&sst_drv_ctx->sst_lock);
-
-	if (sst_drv_ctx->sst_state != SST_RESET ||
+	if (sst_drv_ctx->sst_state != SST_UN_INIT ||
 			ctx->fw_in_mem != NULL)
-		goto out;
+		goto exit;
 
 	pr_debug("Request Fw completed\n");
 	trace_sst_fw_download("End of FW request", ctx->sst_state);
@@ -1217,6 +1220,7 @@ void sst_firmware_load_cb(const struct firmware *fw, void *context)
 		ctx->fw_in_mem = NULL;
 		goto out;
 	}
+
 	/* If static module download(download at boot time) is supported,
 	 * set the flag to indicate lib download is to be done
 	 */
@@ -1224,8 +1228,11 @@ void sst_firmware_load_cb(const struct firmware *fw, void *context)
 		if (ctx->pdata->lib_info->mod_ddr_dnld)
 			ctx->lib_dwnld_reqd = true;
 
+	sst_set_fw_state_locked(sst_drv_ctx, SST_FW_LIB_LOAD);
+	goto exit;
 out:
-	mutex_unlock(&sst_drv_ctx->sst_lock);
+	sst_set_fw_state_locked(sst_drv_ctx, SST_UN_INIT);
+exit:
 	if (fw != NULL)
 		release_firmware(fw);
 }
@@ -1383,9 +1390,8 @@ static int sst_download_library(const struct firmware *fw_lib,
 
 	/* downloading on success */
 	mutex_lock(&sst_drv_ctx->sst_lock);
+	sst_drv_ctx->sst_state = SST_FW_LOADED;
 	mutex_lock(&sst_drv_ctx->csr_lock);
-
-	sst_drv_ctx->sst_state = SST_FW_LOADING;
 	csr.full = readl(sst_drv_ctx->shim + SST_CSR);
 	csr.part.run_stall = 1;
 	sst_shim_write(sst_drv_ctx->shim, SST_CSR, csr.full);
@@ -1537,17 +1543,24 @@ int sst_load_fw(void)
 
 	pr_debug("sst_load_fw\n");
 
-	if (sst_drv_ctx->sst_state !=  SST_RESET ||
+	if ((sst_drv_ctx->sst_state !=  SST_START_INIT &&
+			sst_drv_ctx->sst_state !=  SST_FW_LIB_LOAD) ||
 			sst_drv_ctx->sst_state == SST_SHUTDOWN)
 		return -EAGAIN;
 
 	if (!sst_drv_ctx->fw_in_mem) {
-		trace_sst_fw_download("Req FW sent in check device",
-					sst_drv_ctx->sst_state);
-		pr_debug("sst: FW not in memory retry to download\n");
-		ret_val = sst_request_fw(sst_drv_ctx);
-		if (ret_val)
-			return ret_val;
+		if (sst_drv_ctx->sst_state != SST_START_INIT) {
+			/* even wake*/
+			pr_err("sst : wait for FW to be downloaded\n");
+			return -EBUSY;
+		} else {
+			trace_sst_fw_download("Req FW sent in check device",
+						sst_drv_ctx->sst_state);
+			pr_debug("sst: FW not in memory retry to download\n");
+			ret_val = sst_request_fw(sst_drv_ctx);
+			if (ret_val)
+				return ret_val;
+		}
 	}
 
 	BUG_ON(!sst_drv_ctx->fw_in_mem);
@@ -1557,8 +1570,6 @@ int sst_load_fw(void)
 
 	/* Prevent C-states beyond C6 */
 	pm_qos_update_request(sst_drv_ctx->qos, CSTATE_EXIT_LATENCY_S0i1 - 1);
-
-	sst_drv_ctx->sst_state = SST_FW_LOADING;
 
 	ret_val = sst_drv_ctx->ops->reset();
 	if (ret_val)
@@ -1582,6 +1593,7 @@ int sst_load_fw(void)
 		sst_drv_ctx->ops->post_download(sst_drv_ctx);
 	trace_sst_fw_download("Post download for Lib end",
 			sst_drv_ctx->sst_state);
+	sst_drv_ctx->sst_state = SST_FW_LOADED;
 
 	/* bring sst out of reset */
 	ret_val = sst_drv_ctx->ops->start();

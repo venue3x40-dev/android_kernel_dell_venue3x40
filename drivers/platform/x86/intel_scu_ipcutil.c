@@ -146,7 +146,6 @@ static struct osnib_target_os osnib_target_oses[] = {
 	{ "recovery", SIGNED_RECOVERY_ATTR },
 	{ "fastboot", SIGNED_POS_ATTR },
 	{ "factory", SIGNED_FACTORY_ATTR },
-	{ "factory2", SIGNED_FACTORY2_ATTR },
 };
 
 
@@ -416,7 +415,7 @@ EXPORT_SYMBOL_GPL(intel_scu_ipc_set_osc_clk0);
 
 #define MSIC_VPROG1_MRFLD_ON	0xC1	/* 2.80V and Auto mode */
 #define MSIC_VPROG2_MRFLD_ON	0xC1	/* 2.80V and Auto mode */
-#define MSIC_VPROG3_MRFLD_ON	0x01	/* 1.05V and Auto mode */
+#define MSIC_VPROG3_MRFLD_ON	0xC1	/* 2.80V and Auto mode */
 #define MSIC_VPROG_MRFLD_OFF	0	/* OFF */
 /* End of MRFLD specific.*/
 
@@ -447,12 +446,39 @@ EXPORT_SYMBOL_GPL(intel_scu_ipc_msic_vprog2);
 
 int intel_scu_ipc_msic_vprog3(int on)
 {
-	if (oshob_info->platform_type == INTEL_MID_CPU_CHIP_ANNIEDALE)
+	if ((oshob_info->platform_type == INTEL_MID_CPU_CHIP_TANGIER) ||
+		(oshob_info->platform_type == INTEL_MID_CPU_CHIP_ANNIEDALE))// ||
+	//	(oshob_info->platform_type == INTEL_MID_CPU_CHIP_CARBONCANYON))
 		return intel_scu_ipc_iowrite8(MSIC_VPROG3_MRFLD_CTRL,
 			on ? MSIC_VPROG3_MRFLD_ON : MSIC_VPROG_MRFLD_OFF);
-	return -ENODEV;
+	else
+		return intel_scu_ipc_iowrite8(MSIC_VPROG2_CTRL,
+			on ? MSIC_VPROG2_ON : MSIC_VPROG_OFF);
 }
 EXPORT_SYMBOL_GPL(intel_scu_ipc_msic_vprog3);
+
+/**
+ *      intel_scu_ipc_read_msic_vprog2_reg - Check the vprog2 register, for judge whether the vprog2 is 2.8V
+ *	Return value:
+ *      0: no
+ *      1: yes
+ */
+int intel_scu_ipc_read_msic_vprog2_reg(void)
+{
+    u8 data = 0;
+    int index = 0;
+    while((intel_scu_ipc_ioread8(MSIC_VPROG2_MRFLD_CTRL, &data) < 0) && (index<100)){
+        index++;
+    }
+    if(index < 100 && data == MSIC_VPROG2_MRFLD_ON) {
+        //on
+        //printk("intel_scu_ipc_read_msic_vprog2_reg is on--index:%d, data:%d\n", index, data);
+        return 1;
+    } else {
+        printk("intel_scu_ipc_read_msic_vprog2_reg is off--index:%d, data:%d\n", index, data);
+    }
+    return 0;
+}
 
 /**
  *	scu_reg_access		-	implement register access ioctls
@@ -934,8 +960,6 @@ exit:
 	return ret;
 }
 
-static u32 invalid_checksum;
-
 /* This function is used for the default OSNIB. */
 int intel_scu_ipc_write_osnib(u8 *data, int len, int offset)
 {
@@ -980,9 +1004,6 @@ int intel_scu_ipc_write_osnib(u8 *data, int len, int offset)
 		for (i = 0; i < oshob_info->osnib_size - 1; i++)
 			chksum += osnib_data[i];
 		osnib_data[oshob_info->osnib_size - 1] = ~chksum + 1;
-
-		if (invalid_checksum)
-			osnib_data[oshob_info->osnib_size - 1] = ~chksum;
 	}
 
 	struct_offs = offsetof(struct scu_ipc_oshob, osnibw_ptr) +
@@ -1157,10 +1178,6 @@ int intel_scu_ipc_write_osnib_extend(u8 *data, int len, int offset)
 		/* Fill checksum at the CHECKSUM offset place in OSNIB. */
 		*(posnib_data +
 		    offsetof(struct scu_ipc_osnib, checksum)) = ~chksum + 1;
-
-		if (invalid_checksum)
-			*(posnib_data +
-			    offsetof(struct scu_ipc_osnib, checksum)) = ~chksum;
 	}
 
 	pr_debug("ipc_write_osnib_extend: osnibw ptr addr=%pa size %d\n",
@@ -2298,7 +2315,7 @@ static int intel_mid_scu_ipc_oemnib_debugfs_init(void)
 	/* Add operations /sys/kernel/debug/intel_scu_oshob to control */
 	/* the OEM.                                                     */
 	scu_ipc_oemnib_file = debugfs_create_file("oemnib_debug",
-				S_IFREG | S_IRUSR | S_IWUSR,
+				S_IFREG | S_IRUGO | S_IWUSR | S_IWGRP,
 				scu_ipc_oemnib_dir,
 				NULL, &scu_ipc_oemnib_fops);
 
@@ -2311,7 +2328,7 @@ static int intel_mid_scu_ipc_oemnib_debugfs_init(void)
 	/* Add operations /sys/kernel/debug/intel_scu_oshob to debug OSHOB */
 	/* content.                                                         */
 	scu_ipc_oshob_file = debugfs_create_file("oshob_dump",
-				S_IFREG | S_IRUSR | S_IWUSR,
+				S_IFREG | S_IRUGO | S_IWUSR | S_IWGRP,
 				scu_ipc_oemnib_dir, NULL, &scu_ipc_oshob_fops);
 
 	if (!scu_ipc_oshob_file) {
@@ -2604,7 +2621,7 @@ static ssize_t intel_scu_ipc_osnib_read_reset_event(
 }
 
 /* Attach the debugfs operations methods */
-static const struct file_operations scu_ipc_osnib_reset_event_fops = {
+static const struct file_operations scu_ipc_osnib_fops = {
 	.owner = THIS_MODULE,
 	.read  = intel_scu_ipc_osnib_read_reset_event,
 };
@@ -2613,56 +2630,12 @@ static struct dentry *scu_ipc_osnib_dir;
 static struct dentry *scu_ipc_osnib_file_reset_ev1;
 static struct dentry *scu_ipc_osnib_file_reset_ev2;
 
-static ssize_t intel_scu_ipc_osnib_read_checksum(
-	struct file *file, char __user *buf,
-	size_t count, loff_t *ppos)
-{
-	loff_t pos = *ppos;
-	u8 checksum = 0;
-	int ret;
-
-	if (pos > 0)
-		return 0;
-
-	ret = oshob_info->scu_ipc_read_osnib(
-	    &checksum,
-	    1,
-	    offsetof(struct scu_ipc_osnib, checksum));
-
-	if (ret != 0) {
-		pr_err("%s: cannot read CHECKSUM, ret=%d", __func__, ret);
-		return ret;
-	}
-
-	/*
-	*  buf is allocated by the kernel (4ko) and we will
-	*  never write more than 6 bytes so no need to check
-	*/
-	ret = sprintf(buf, "0x%x\n", checksum);
-	if (ret < 0) {
-		pr_err("%s: cannot convert the value, ret = %d", __func__, ret);
-		return ret;
-	}
-
-	*ppos += ret;
-	return ret;
-}
-
-static const struct file_operations scu_ipc_osnib_checksum_fops = {
-	.owner = THIS_MODULE,
-	.read  = intel_scu_ipc_osnib_read_checksum,
-};
-
-static struct dentry *scu_ipc_osnib_file_checksum;
-
 /*
 *	debugfs interface: init interface.
 */
 static int intel_mid_scu_ipc_osnib_debugfs_init(void)
 {
 	int i;
-	int ret = 0;
-	bool found = false;
 
 	/* Create debugfs directory /sys/kernel/debug/intel_scu_osnib */
 	scu_ipc_osnib_dir = debugfs_create_dir("intel_scu_osnib", NULL);
@@ -2672,64 +2645,43 @@ static int intel_mid_scu_ipc_osnib_debugfs_init(void)
 		return -1;
 	}
 
-	scu_ipc_osnib_file_checksum = debugfs_create_file(
-		"CHECKSUM",
-		S_IFREG | S_IRUSR,
-		scu_ipc_osnib_dir,
-		NULL,
-		&scu_ipc_osnib_checksum_fops);
-
-	if (!scu_ipc_osnib_file_checksum) {
-		pr_err("%s: cannot create CHECKSUM debugfs file\n", __func__);
-		ret = -1;
-	}
-
-	if (!debugfs_create_bool("invalid_checksum", S_IFREG | S_IRUSR | S_IWUSR,
-		scu_ipc_osnib_dir, &invalid_checksum)) {
-		pr_err("%s: cannot create invalid_checksum debugfs file\n", __func__);
-		ret = -1;
-	}
-
 	for (i = 0; i < ARRAY_SIZE(chip_reset_events); i++) {
 		if (chip_reset_events[i].id == oshob_info->platform_type) {
 
 			scu_ipc_osnib_file_reset_ev1 = debugfs_create_file(
 					chip_reset_events[i].reset_ev1_name,
-					S_IFREG | S_IRUSR,
+					S_IFREG | S_IRUGO,
 					scu_ipc_osnib_dir,
-					NULL, &scu_ipc_osnib_reset_event_fops);
+					NULL, &scu_ipc_osnib_fops);
 
 			if (!scu_ipc_osnib_file_reset_ev1) {
 				pr_err("%s: cannot create %s debugfs file\n",
 					__func__,
 					chip_reset_events[i].reset_ev1_name);
-				ret = -1;
+				debugfs_remove(scu_ipc_osnib_dir);
+				return -1;
 			}
 
 			scu_ipc_osnib_file_reset_ev2 = debugfs_create_file(
 					chip_reset_events[i].reset_ev2_name,
-					S_IFREG | S_IRUSR,
+					S_IFREG | S_IRUGO,
 					scu_ipc_osnib_dir,
-					NULL, &scu_ipc_osnib_reset_event_fops);
+					NULL, &scu_ipc_osnib_fops);
 
 			if (!scu_ipc_osnib_file_reset_ev2) {
 				pr_err("%s: cannot create %s debugfs file\n",
 					__func__,
 					chip_reset_events[i].reset_ev1_name);
-				ret = -1;
+				debugfs_remove_recursive(scu_ipc_osnib_dir);
+				return -1;
 			}
 
-			found = true;
-			break;
+			return 0;
 		}
 	}
 
-	if (!found) {
-		pr_err("%s: param not found\n", __func__);
-		ret = -EFAULT;
-	}
-
-	return ret;
+	pr_err("%s: param not found\n", __func__);
+	return -EFAULT;
 }
 
 /*
@@ -2970,9 +2922,11 @@ static int oshob_init(void)
 	}
 
 #ifdef DUMP_OSNIB
-	if (intel_mid_scu_ipc_osnib_debugfs_init() != 0)
-		pr_err("Problem when register OSNIB interface to debugfs\n");
-	else
+	ret = intel_mid_scu_ipc_osnib_debugfs_init();
+	if (ret != 0) {
+		pr_err("Cannot register OSNIB interface to debugfs\n");
+		goto exit;
+	} else
 		pr_info("OSNIB interface registered to debugfs\n");
 #endif /* DUMP_OSNIB */
 #endif /* CONFIG_DEBUG_FS */

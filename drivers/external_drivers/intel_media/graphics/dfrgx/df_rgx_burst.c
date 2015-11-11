@@ -280,7 +280,7 @@ static void dfrgx_add_sample_data(struct df_rgx_data_s *g_dfrgx,
 	static int sum_samples_active;
 	int ret = 0;
 
-	sum_samples_active += ((util_stats_sample.ui32GpuStatActiveHigh) / 100);
+	sum_samples_active += ((util_stats_sample.ui32GpuStatActive) / 100);
 	num_samples++;
 
 	/* When we collect MAX_NUM_SAMPLES samples we need to decide
@@ -397,7 +397,7 @@ static int df_rgx_action(struct df_rgx_data_s *g_dfrgx)
 		DFRGX_DPF(DFRGX_DEBUG_LOW, "%s: Active: %d, "
 			"Blocked: %d, Idle: %d !\n",
 			__func__,
-			util_stats.ui32GpuStatActiveHigh,
+			util_stats.ui32GpuStatActive,
 			util_stats.ui32GpuStatBlocked,
 			util_stats.ui32GpuStatIdle);
 

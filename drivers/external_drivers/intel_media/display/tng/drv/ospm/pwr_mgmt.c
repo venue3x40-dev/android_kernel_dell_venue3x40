@@ -43,7 +43,6 @@
 #include "gfx_ospm.h"
 #endif
 #include "dc_ospm.h"
-#include "dc_maxfifo.h"
 #include "video_ospm.h"
 #include "early_suspend.h"
 #include "early_suspend_sysfs.h"
@@ -189,8 +188,6 @@ static void ospm_suspend_pci(struct drm_device *dev)
 	dev_priv->saveBGSM = bgsm;
 	pci_read_config_dword(pdev, PSB_PCIx_MSI_ADDR_LOC, &dev_priv->msi_addr);
 	pci_read_config_dword(pdev, PSB_PCIx_MSI_DATA_LOC, &dev_priv->msi_data);
-	pci_save_state(pdev);
-	pci_set_power_state(pdev, PCI_D3hot);
 }
 
 /**
@@ -399,7 +396,7 @@ static bool any_island_on(void)
 bool power_island_get(u32 hw_island)
 {
 	u32 i = 0;
-	bool ret = true, first_island = false;
+	bool ret = true;
 	int pm_ret;
 	struct ospm_power_island *p_island;
 	struct drm_psb_private *dev_priv = g_ospm_data->dev->dev_private;
@@ -419,7 +416,6 @@ bool power_island_get(u32 hw_island)
 				&g_ospm_data->dev->pdev->dev);
 			goto out_err;
 		}
-		first_island = true;
 
 	}
 
@@ -436,8 +432,6 @@ bool power_island_get(u32 hw_island)
 	}
 
 out_err:
-	if (ret && first_island)
-		pm_qos_remove_request(&dev_priv->s0ix_qos);
 	mutex_unlock(&g_ospm_data->ospm_lock);
 
 	return ret;
@@ -478,9 +472,7 @@ out_err:
 		/* Here, we use runtime pm framework to suit
 		 * S3 PCI suspend/resume
 		 */
-		pm_qos_add_request(&dev_priv->s0ix_qos,
-				PM_QOS_CPU_DMA_LATENCY, CSTATE_EXIT_LATENCY_S0i1 - 1);
-		pm_runtime_put_sync_suspend(&g_ospm_data->dev->pdev->dev);
+		pm_runtime_put(&g_ospm_data->dev->pdev->dev);
 		wake_unlock(&dev_priv->ospm_wake_lock);
 	}
 	mutex_unlock(&g_ospm_data->ospm_lock);
@@ -566,13 +558,7 @@ void ospm_power_init(struct drm_device *dev)
 			case OSPM_DISPLAY_A:
 			case OSPM_DISPLAY_C:
 			case OSPM_DISPLAY_MIO:
-				atomic_set(&island_list[i].ref_count, 1);
-				island_list[i].island_state = OSPM_POWER_ON;
-				if (island_list[i].p_dependency) {
-					atomic_inc(&island_list[i].p_dependency->ref_count);
-					island_list[i].island_state = OSPM_POWER_ON;
-				}
-
+				island_list[i].p_funcs->power_down(dev, &island_list[i]);
 				break;
 			default:
 				break;
@@ -585,7 +571,7 @@ void ospm_power_init(struct drm_device *dev)
 	intel_media_early_suspend_init(dev);
 #endif
 	intel_media_early_suspend_sysfs_init(dev);
-	dc_maxfifo_init(dev);
+
 	rtpm_init(dev);
 out_err:
 	return;
@@ -849,12 +835,6 @@ void ospm_apm_power_down_vsp(struct drm_device *dev)
 		power_down_island(p_island->p_dependency);
 	}
 
-	if (!any_island_on()) {
-		PSB_DEBUG_PM("Suspending PCI\n");
-		pm_runtime_put(&g_ospm_data->dev->pdev->dev);
-		wake_unlock(&dev_priv->ospm_wake_lock);
-	}
-
 	PSB_DEBUG_PM("Power down VPP done\n");
 out:
 	mutex_unlock(&g_ospm_data->ospm_lock);
@@ -863,11 +843,12 @@ out:
 
 int ospm_runtime_pm_allow(struct drm_device *dev)
 {
-	pm_runtime_allow(&dev->pdev->dev);
 	return 0;
 }
 
 void ospm_runtime_pm_forbid(struct drm_device *dev)
 {
+	struct drm_psb_private *dev_priv = dev->dev_private;
+
 	pm_runtime_forbid(&dev->pdev->dev);
 }

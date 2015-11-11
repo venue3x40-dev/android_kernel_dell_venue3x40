@@ -74,7 +74,7 @@ unsigned int sst_soc_read(struct snd_soc_platform *platform,
 {
 	struct sst_data *sst = snd_soc_platform_get_drvdata(platform);
 
-	pr_debug("%s: reg[%d] = %#x\n", __func__, reg, sst->widget[reg]);
+	pr_debug("%s for reg %d val=%d\n", __func__, reg, sst->widget[reg]);
 	BUG_ON(reg > (SST_NUM_WIDGETS - 1));
 	return sst->widget[reg];
 }
@@ -84,7 +84,7 @@ int sst_soc_write(struct snd_soc_platform *platform,
 {
 	struct sst_data *sst = snd_soc_platform_get_drvdata(platform);
 
-	pr_debug("%s: reg[%d] = %#x\n", __func__, reg, val);
+	pr_debug("%s for reg %d val %d\n", __func__, reg, val);
 	BUG_ON(reg > (SST_NUM_WIDGETS - 1));
 	sst->widget[reg] = val;
 	return 0;
@@ -123,7 +123,7 @@ int sst_mix_put(struct snd_kcontrol *kcontrol,
 	int connect;
 	struct snd_soc_dapm_update update;
 
-	pr_debug("%s called set %#lx for %s\n", __func__,
+	pr_debug("%s called set %ld for %s\n", __func__,
 			ucontrol->value.integer.value[0], widget->name);
 	val = sst_reg_write(sst, mc->reg, mc->shift, mc->max, ucontrol->value.integer.value[0]);
 	connect = !!val;
@@ -150,6 +150,7 @@ int sst_mix_get(struct snd_kcontrol *kcontrol,
 		(struct soc_mixer_control *)kcontrol->private_value;
 	struct sst_data *sst = snd_soc_platform_get_drvdata(w->platform);
 
+	pr_debug("%s called for %s\n", __func__, w->name);
 	ucontrol->value.integer.value[0] = !!sst_reg_read(sst, mc->reg, mc->shift, mc->max);
 	return 0;
 }
@@ -1668,7 +1669,7 @@ static int sst_compr_vol_set(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-int sst_vtsv_enroll_set(struct snd_kcontrol *kcontrol,
+static int sst_vtsv_enroll_set(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_platform *platform = snd_kcontrol_chip(kcontrol);
@@ -1684,7 +1685,7 @@ int sst_vtsv_enroll_set(struct snd_kcontrol *kcontrol,
 	return ret;
 }
 
-int sst_vtsv_enroll_get(struct snd_kcontrol *kcontrol,
+static int sst_vtsv_enroll_get(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_platform *platform = snd_kcontrol_chip(kcontrol);

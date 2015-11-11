@@ -183,6 +183,20 @@ static unsigned char default_edid[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x8B
 };
 
+#define HDMI_HOTPLUG_DELAY (2*HZ)
+
+static void hdmi_hotplug_delay_wq_func(struct work_struct *work)
+{
+
+	struct android_hdmi_priv *hdmi_priv =
+		container_of(work, struct android_hdmi_priv, hdmi_delayed_wq.work);
+	struct drm_device *dev = hdmi_priv->dev;
+
+	struct delayed_work *delayed_work = to_delayed_work(work);
+	if (!delayed_work_pending(delayed_work))
+		ospm_runtime_pm_allow(dev);
+}
+
 static struct edid *drm_get_edid_retry(struct drm_connector *connector,
 				struct i2c_adapter *adapter, void *context)
 {
@@ -317,6 +331,12 @@ exit:
 			hdmi_state = 1;
 			uevent_string = "HOTPLUG_IN=1";
 			psb_sysfs_uevent(hdmi_priv->dev, uevent_string);
+			/* Delay ospm activity till hotplug has propogated
+			 * through the system
+			 */
+			pr_debug("%s: Delaying any OSPM activity\n", __func__);
+			ospm_runtime_pm_forbid(hdmi_priv->dev);
+			schedule_delayed_work(&hdmi_priv->hdmi_delayed_wq, HDMI_HOTPLUG_DELAY);
 		} else {
 			otm_hdmi_power_rails_off();
 			hdmi_state = 0;
@@ -454,6 +474,8 @@ void android_hdmi_driver_setup(struct drm_device *dev)
 		goto free;
 	}
 
+	/* Initialize the hotplug delay workqueue */
+	INIT_DELAYED_WORK(&hdmi_priv->hdmi_delayed_wq, (void *)hdmi_hotplug_delay_wq_func);
 	pr_info("%s: Done with driver setup\n", __func__);
 	pr_info("Exit %s\n", __func__);
 	return;
@@ -885,7 +907,9 @@ static int android_hdmi_add_cea_edid_modes(void *context,
 						mode_entry->flags |= DRM_MODE_FLAG_PAR16_9;
 					break;
 			}
-			drm_mode_destroy(connector->dev, newmode);
+
+			/* restore flag */
+			newmode->flags = saved_flags;
 		}
 	}
 

@@ -53,7 +53,6 @@
 
 #define PMIC_BZONE_LOW 0
 #define PMIC_BZONE_HIGH 5
-#define PMIC_BZONE_UNKNOWN 7
 
 #define IRQLVL1_ADDR			0x01
 #define IRQLVL1_MASK_ADDR		0x0c
@@ -81,12 +80,6 @@
 #define THRMZN4H_ADDR_SC		0xE1
 #define THRMZN4L_ADDR_SC		0xE2
 
-#define THRMZN0_SC_ADCVAL		0x25A1
-#define THRMZN1_SC_ADCVAL		0x3512
-#define THRMZN2_SC_ADCVAL		0x312D
-#define THRMZN3_SC_ADCVAL		0x20FE
-#define THRMZN4_SC_ADCVAL		0x10B8
-
 #define CHGRIRQ0_ADDR			0x07
 #define CHGIRQ0_BZIRQ_MASK		D7
 #define CHGIRQ0_BAT_CRIT_MASK		D6
@@ -112,27 +105,20 @@
 #define VDCINDETCTRL_ADDR		0x51
 
 #define CHRGRIRQ1_ADDR			0x08
-#define CHRGRIRQ1_SUSBIDGNDDET_MASK	D4
-#define CHRGRIRQ1_SUSBIDFLTDET_MASK	D3
 #define CHRGRIRQ1_SUSBIDDET_MASK	D3
 #define CHRGRIRQ1_SBATTDET_MASK		D2
 #define CHRGRIRQ1_SDCDET_MASK		D1
 #define CHRGRIRQ1_SVBUSDET_MASK		D0
 #define MCHGRIRQ1_ADDR			0x13
-#define MCHRGRIRQ1_SUSBIDGNDDET_MASK	D4
-#define MCHRGRIRQ1_SUSBIDFLTDET_MASK	D3
 #define MCHRGRIRQ1_SUSBIDDET_MASK	D3
 #define MCHRGRIRQ1_SBATTDET_MAS		D2
 #define MCHRGRIRQ1_SDCDET_MASK		D1
 #define MCHRGRIRQ1_SVBUSDET_MASK	D0
 #define SCHGRIRQ1_ADDR			0x4F
-#define SCHRGRIRQ1_SUSBIDGNDDET_MASK	(D3|D4)
 #define SCHRGRIRQ1_SUSBIDDET_MASK	D3
 #define SCHRGRIRQ1_SBATTDET_MASK	D2
 #define SCHRGRIRQ1_SDCDET_MASK		D1
 #define SCHRGRIRQ1_SVBUSDET_MASK	D0
-#define SHRT_GND_DET			(0x01 << 3)
-#define SHRT_FLT_DET			(0x01 << 4)
 
 #define PMIC_CHRGR_INT0_MASK		0xB1
 #define PMIC_CHRGR_CCSM_INT0_MASK	0xB0
@@ -203,7 +189,7 @@
 #define CHRTTADDR_ADDR		0x56
 #define CHRTTDATA_ADDR		0x57
 
-#define USBSRCDET_RETRY_CNT		5
+#define USBSRCDET_RETRY_CNT		4
 #define USBSRCDET_SLEEP_TIME		200
 #define USBSRCDETSTATUS_ADDR		0x5D
 #define USBSRCDET_SUSBHWDET_MASK	(D0|D1)
@@ -302,6 +288,13 @@
 #define PMIC_REG_NAME_LEN		28
 #define PMIC_REG_DEF(x) { .reg_name = #x, .addr = x }
 
+#define PMIC_VLDOCNT_ADDR		0xAF
+#define PMIC_VLDOCNT_VREFTEN	(0x1 << 3)
+//md add the chgled control logic
+#define PMIC_CHGLEDCTRL_ADDR	0x53
+#define PMIC_CHGLEDCTRL_LEDEFF	(0x3 << 1)
+#define PMIC_CHGLEDFSM_ADDR		0x54
+#define PMIC_CHGLEDPWM_ADDR		0x55
 struct interrupt_info {
 	/* Interrupt register mask*/
 	u8 int_reg_mask;
@@ -316,15 +309,6 @@ struct interrupt_info {
 	void (*int_handle) (void);
 	/* interrupt status handler */
 	void (*stat_handle) (bool);
-};
-
-enum pmic_charger_aca_type {
-	RID_UNKNOWN = 0,
-	RID_A,
-	RID_B,
-	RID_C,
-	RID_FLOAT,
-	RID_GND,
 };
 
 enum pmic_charger_cable_type {
@@ -353,7 +337,6 @@ struct pmic_chrgr_drv_context {
 	enum pmic_charger_cable_type charger_type;
 	/* ShadyCove-WA for VBUS removal detect issue */
 	bool vbus_connect_status;
-	bool otg_mode_enabled;
 	struct ps_batt_chg_prof *sfi_bcprof;
 	struct ps_pse_mod_prof *actual_bcprof;
 	struct ps_pse_mod_prof *runtime_bcprof;
@@ -363,7 +346,6 @@ struct pmic_chrgr_drv_context {
 	struct work_struct evt_work;
 	struct mutex evt_queue_lock;
 	struct wake_lock wakelock;
-	struct wake_lock otg_wa_wakelock;
 };
 
 struct pmic_event {

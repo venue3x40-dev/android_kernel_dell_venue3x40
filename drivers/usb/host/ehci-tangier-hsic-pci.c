@@ -29,18 +29,11 @@
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 
-#define INIT_TASK_PID	1
-
 static struct pci_dev	*pci_dev;
-static struct class *hsic_class;
-static struct device *hsic_class_dev;
-
 
 static int ehci_hsic_start_host(struct pci_dev  *pdev);
 static int ehci_hsic_stop_host(struct pci_dev *pdev);
 static int create_device_files(void);
-static int create_class_device_files(void);
-static void remove_class_device_files(void);
 static void remove_device_files(void);
 
 static int enabling_disabling;
@@ -792,14 +785,7 @@ static ssize_t hsic_port_enable_store(struct device *dev,
 		hsic_enter_exit_d3(1);
 		usleep_range(5000, 6000);
 		hsic_enter_exit_d3(0);
-		retval = ehci_hsic_start_host(pci_dev);
-		if (retval < 0) {
-			dev_err(&pci_dev->dev,
-				"start host fail, retval %d\n", retval);
-			mutex_unlock(&hsic.hsic_mutex);
-			return retval;
-		}
-
+		ehci_hsic_start_host(pci_dev);
 		hsic.autosuspend_enable = 0;
 		usb_disable_autosuspend(hsic.rh_dev);
 	} else {
@@ -922,54 +908,6 @@ static ssize_t hsic_autosuspend_enable_store(struct device *dev,
 static DEVICE_ATTR(L2_autosuspend_enable, S_IRUGO | S_IWUSR | S_IROTH,
 		hsic_autosuspend_enable_show,
 		 hsic_autosuspend_enable_store);
-
-static ssize_t hsic_pm_enable_show(struct device *dev,
-		struct device_attribute *attr, char *buf)
-{
-	return sprintf(buf, "%d\n", hsic.autosuspend_enable);
-}
-
-static ssize_t hsic_pm_enable_store(struct device *dev,
-		struct device_attribute *attr, const char *buf, size_t size)
-{
-	int rc;
-	u8 pm_enable;
-
-	if (size > HSIC_ENABLE_SIZE)
-		return -EINVAL;
-
-	if (sscanf(buf, "%d", &pm_enable) != 1) {
-		dev_dbg(dev, "Invalid, value\n");
-		return -EINVAL;
-	}
-
-	/*  pm_enable definition: 0b00 - L1 & L2 disabled, 0b01 - L2 only
-	  *  0b10 - L1 only, 0b11 - L1 + L2 enabled
-	   */
-	switch (pm_enable) {
-	case 0:
-		rc = hsic_autosuspend_enable_store(dev, attr, "0", size);
-		break;
-	case 1:
-		rc = hsic_autosuspend_enable_store(dev, attr, "1", size);
-		break;
-	case 2: /*Reserved for L1 only*/
-		break;
-	case 3: /* Reserved for L1 + L2*/
-		break;
-	default:
-		rc = -EINVAL;
-	}
-
-	if (rc == size)
-		return size;
-	else
-		return -EINVAL;
-}
-
-static DEVICE_ATTR(pm_enable, S_IRUGO | S_IWUSR | S_IROTH,
-		hsic_pm_enable_show,
-		 hsic_pm_enable_store);
 
 static ssize_t hsic_bus_inactivityDuration_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
@@ -1101,82 +1039,6 @@ static const struct file_operations hsic_debugfs_registers_fops = {
 	.release		= single_release,
 };
 
-static int create_class_device_files(void)
-{
-	int retval;
-
-	hsic_class = class_create(NULL, "hsic");
-
-	if (IS_ERR(hsic_class))
-			return -EFAULT;
-
-	hsic_class_dev = device_create(hsic_class, &pci_dev->dev,
-			MKDEV(0, 0), NULL, "hsic0");
-
-	if (IS_ERR(hsic_class_dev)) {
-		retval = -EFAULT;
-		goto hsic_class_fail;
-	}
-
-	retval = device_create_file(hsic_class_dev, &dev_attr_hsic_enable);
-	if (retval < 0) {
-		dev_dbg(&pci_dev->dev, "error create hsic_enable\n");
-		goto hsic_class_dev_fail;
-	}
-	hsic.autosuspend_enable = 0;
-	retval = device_create_file(hsic_class_dev,
-			 &dev_attr_L2_autosuspend_enable);
-	if (retval < 0) {
-		dev_dbg(&pci_dev->dev, "Error create autosuspend_enable\n");
-		goto hsic_class_dev_fail;
-	}
-
-	hsic.port_inactivityDuration = HSIC_PORT_INACTIVITYDURATION;
-	retval = device_create_file(hsic_class_dev,
-			 &dev_attr_L2_inactivityDuration);
-	if (retval < 0) {
-		dev_dbg(&pci_dev->dev, "Error create port_inactiveDuration\n");
-		goto hsic_class_dev_fail;
-	}
-
-	hsic.bus_inactivityDuration = HSIC_BUS_INACTIVITYDURATION;
-	retval = device_create_file(hsic_class_dev,
-			 &dev_attr_bus_inactivityDuration);
-	if (retval < 0) {
-		dev_dbg(&pci_dev->dev, "Error create bus_inactiveDuration\n");
-		goto hsic_class_dev_fail;
-	}
-
-	hsic.remoteWakeup_enable = HSIC_REMOTEWAKEUP;
-	retval = device_create_file(hsic_class_dev, &dev_attr_remoteWakeup);
-	if (retval < 0) {
-		dev_dbg(&pci_dev->dev, "Error create remoteWakeup\n");
-		goto hsic_class_dev_fail;
-	}
-
-	retval = device_create_file(hsic_class_dev,
-		 &dev_attr_pm_enable);
-
-	if (retval == 0)
-		return retval;
-
-	dev_dbg(&pci_dev->dev, "Error create pm_enable\n");
-
-hsic_class_dev_fail:
-	device_destroy(hsic_class, hsic_class_dev->devt);
-hsic_class_fail:
-	class_destroy(hsic_class);
-
-	return retval;
-}
-
-static void remove_class_device_files(void)
-{
-	device_destroy(hsic_class, hsic_class_dev->devt);
-	class_destroy(hsic_class);
-}
-
-/* FixMe: create_device_files() need to be removed */
 static int create_device_files()
 {
 	int retval;
@@ -1226,8 +1088,7 @@ autosuspend:
 host_resume:
 	device_remove_file(&pci_dev->dev, &dev_attr_hsic_enable);
 hsic_enable:
-hsic_class_fail:
-
+dump_registers:
 	return retval;
 }
 
@@ -1402,12 +1263,6 @@ static int ehci_hsic_probe(struct pci_dev *pdev,
 			dev_dbg(&pdev->dev, "error create device files\n");
 			goto release_mem_region;
 		}
-
-		retval = create_class_device_files();
-		if (retval < 0) {
-			dev_dbg(&pdev->dev, "error create device files\n");
-			goto release_mem_region;
-		}
 		hsic.hsic_enable_created = 1;
 	}
 
@@ -1450,11 +1305,6 @@ static int ehci_hsic_probe(struct pci_dev *pdev,
 	hsic.s3_rt_state = RESUMED;
 	s3_wake_lock();
 	hsic_debugfs_init(hcd);
-
-	if (current->pid == INIT_TASK_PID) {
-		dev_info(&pdev->dev, "disable hsic on driver init!\n");
-		ehci_hsic_stop_host(pdev);
-	}
 
 	return retval;
 unmap_registers:

@@ -539,7 +539,6 @@ static int psb_init_mem_type(struct ttm_bo_device *bdev, uint32_t type,
 		man->available_caching = TTM_PL_FLAG_CACHED |
 					 TTM_PL_FLAG_UNCACHED | TTM_PL_FLAG_WC;
 		man->default_caching = TTM_PL_FLAG_WC;
-		printk(KERN_INFO "[TTM] DRM_PSB_MEM_MMU heap: start 0x%x\n", man->gpu_offset);
 		break;
 #ifndef CONFIG_DRM_VXD_BYT
 #if !defined(MERRIFIELD)
@@ -566,7 +565,6 @@ static int psb_init_mem_type(struct ttm_bo_device *bdev, uint32_t type,
 		man->default_caching = TTM_PL_FLAG_WC;
 		man->gpu_offset =
 		    pg->mmu_gatt_start + pg->gtt_video_start;
-		printk(KERN_INFO "[TTM] TTM_PL_TT heap: start 0x%x\n", man->gpu_offset);
 		break;
 #endif
 
@@ -578,7 +576,6 @@ static int psb_init_mem_type(struct ttm_bo_device *bdev, uint32_t type,
 		man->available_caching = TTM_PL_FLAG_CACHED |
 					 TTM_PL_FLAG_UNCACHED | TTM_PL_FLAG_WC;
 		man->default_caching = TTM_PL_FLAG_WC;
-		printk(KERN_INFO "[TTM] DRM_PSB_MEM_MMU_TILING heap: start 0x%x\n", man->gpu_offset);
 		break;
 
 	default:

@@ -12,10 +12,13 @@
 #include <linux/usb/otg.h>
 #include "power_supply.h"
 #include "power_supply_charger.h"
+#include <linux/gpio.h>
+#include <linux/intel_mid_hwid.h>
 
 struct work_struct notifier_work;
 #define MAX_CHARGER_COUNT 5
-
+//MD:add for getting batt level
+#define MAX_CUR_CAP_SAMPLES 5
 static LIST_HEAD(algo_list);
 
 struct power_supply_charger {
@@ -569,6 +572,7 @@ static int get_supplied_by_list(struct power_supply *psy,
 
 static int get_battery_status(struct power_supply *psy)
 {
+	int i;
 	int cnt, status, ret;
 	struct power_supply *chrgr_lst[MAX_CHARGER_COUNT];
 	struct batt_props bat_prop;
@@ -600,8 +604,15 @@ static int get_battery_status(struct power_supply *psy)
 					(bat_prop.algo_stat ==
 							PSY_ALGO_STAT_MAINT))
 					status = POWER_SUPPLY_STATUS_FULL;
-				else if (IS_CHARGING_ENABLED(chrgr_lst[cnt]))
-					status = POWER_SUPPLY_STATUS_CHARGING;
+				else if (IS_CHARGING_ENABLED(chrgr_lst[cnt])){
+					for(i=(MAX_CUR_CAP_SAMPLES-1);i>=0;i--){
+						if(CAP(psy)<100){
+							pr_info("%s:the batt is not full.\n");
+							return POWER_SUPPLY_STATUS_CHARGING;
+						}
+					}
+					status = POWER_SUPPLY_STATUS_FULL;
+				}
 			}
 		}
 	}
@@ -676,6 +687,9 @@ static int trigger_algo(struct power_supply *psy)
 	struct charging_algo *algo;
 	struct ps_batt_chg_prof chrg_profile;
 	int cnt;
+	//md add the wireless charging cc
+	int wireless_cc = 0;
+	int gpio_value;
 
 	if (psy->type != POWER_SUPPLY_TYPE_BATTERY)
 		return 0;
@@ -714,8 +728,22 @@ static int trigger_algo(struct power_supply *psy)
 	while (cnt--) {
 		if (!IS_PRESENT(chrgr_lst[cnt]))
 			continue;
-
 		cc_min = min_t(unsigned long, MAX_CC(chrgr_lst[cnt]), cc);
+		
+		//md add the 8inch  wireless charging algo
+		gpio_value = gpio_get_value(45);
+		if((!(intel_mid_get_board_id() & HW_BOARD_7_LTE))&&(!gpio_value)){
+
+			wireless_cc = CC(chrgr_lst[cnt]);
+			if(wireless_cc == 500)
+				cc_min = 500;
+			else if (wireless_cc == 900)
+				cc_min =900;
+			else 
+				cc_min =500;
+		}
+		
+
 		if (cc_min < 0)
 			cc_min = 0;
 		cc -= cc_min;

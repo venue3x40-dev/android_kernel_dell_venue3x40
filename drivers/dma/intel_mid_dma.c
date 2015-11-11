@@ -579,7 +579,7 @@ static int midc_lli_fill_sg(struct intel_mid_dma_chan *midc,
 		ctl_hi = get_block_ts(sg->length, desc->width,
 					midc->dma->block_size, midc->dma->dword_trf);
 		/*Populate SAR and DAR values*/
-		sg_phy_addr = sg_dma_address(sg);
+		sg_phy_addr = sg_phys(sg);
 		if (desc->dirn ==  DMA_MEM_TO_DEV) {
 			lli_bloc_desc->sar  = sg_phy_addr;
 			lli_bloc_desc->dar  = mids->dma_slave.dst_addr;
@@ -1269,22 +1269,6 @@ static struct dma_async_tx_descriptor *intel_mid_dma_chan_prep_desc(
 		dma_pool_destroy(desc->lli_pool);
 		return NULL;
 	}
-
-	/*
-	 * dma_map_sg() helps to convert DMA address to comply to what the
-	 * device's dma mask asks for. On systems with 4+ GB DDR memory,
-	 * kmalloc() simply returns an address larger than 0x1 0000 0000.
-	 * For audio DMA(32-bit OCP master), obviously it can't handle
-	 * that address. So dma_map_sg() does the magic to re-assign a new
-	 * 32-bit DMA address(a memcpy actually on x86 no-IOMMU platforms)
-	 */
-	if (!dma_map_sg(mid->dev, src_sg, src_sg_len, DMA_MEM_TO_MEM)) {
-		pr_err("MID_DMA: dma_map_sg() failed\n");
-		dma_pool_free(desc->lli_pool, desc->lli, desc->lli_phys);
-		dma_pool_destroy(desc->lli_pool);
-		return NULL;
-	}
-
 	midc_lli_fill_sg(midc, desc, src_sg, dst_sg, src_sg_len, flags);
 	if (flags & DMA_PREP_INTERRUPT) {
 		/* Enable Block intr, disable TFR intr.

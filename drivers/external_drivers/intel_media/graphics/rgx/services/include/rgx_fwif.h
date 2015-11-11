@@ -231,59 +231,34 @@ typedef struct _RGXFWIF_TRACEBUF_
  ******************************************************************************
  * GPU Utilization FW CB
  *****************************************************************************/
-#define RGXFWIF_GPU_STATS_WINDOW_SIZE_US                       500000                  /*!< Time window considered for active/idle/blocked statistics */
-#define RGXFWIF_GPU_STATS_STATE_CHG_PER_SEC                    1000                    /*!< Expected number of maximum GPU state changes per second */
-#define RGXFWIF_GPU_STATS_MAX_VALUE_OF_STATE           10000
-
-#define RGXFWIF_GPU_UTIL_FWCB_SIZE     ((RGXFWIF_GPU_STATS_WINDOW_SIZE_US * RGXFWIF_GPU_STATS_STATE_CHG_PER_SEC) / 1000000)
-
-#define RGXFWIF_GPU_UTIL_FWCB_TYPE_CRTIME              IMG_UINT64_C(0x0)
-#define RGXFWIF_GPU_UTIL_FWCB_TYPE_POWER_ON            IMG_UINT64_C(0x1)
-#define RGXFWIF_GPU_UTIL_FWCB_TYPE_POWER_OFF   IMG_UINT64_C(0x2)
-#define RGXFWIF_GPU_UTIL_FWCB_TYPE_END_CRTIME  IMG_UINT64_C(0x3)
-#define RGXFWIF_GPU_UTIL_FWCB_TYPE_MASK                        IMG_UINT64_C(0xC000000000000000)
-#define RGXFWIF_GPU_UTIL_FWCB_TYPE_SHIFT               (62)
-
-#define RGXFWIF_GPU_UTIL_FWCB_STATE_ACTIVE_LOW IMG_UINT64_C(0x0)
+#define RGXFWIF_GPU_UTIL_FWCB_SIZE_WIDTH		(8)
+#define RGXFWIF_GPU_UTIL_FWCB_SIZE				(1 << RGXFWIF_GPU_UTIL_FWCB_SIZE_WIDTH)
+#define RGXFWIF_GPU_UTIL_FWCB_MASK				(RGXFWIF_GPU_UTIL_FWCB_SIZE - 1)
+#define RGXFWIF_GPU_UTIL_FWCB_STATE_RESERVED	IMG_UINT64_C(0x0)
 #define RGXFWIF_GPU_UTIL_FWCB_STATE_IDLE		IMG_UINT64_C(0x1)
-#define RGXFWIF_GPU_UTIL_FWCB_STATE_ACTIVE_HIGH		IMG_UINT64_C(0x2)
+#define RGXFWIF_GPU_UTIL_FWCB_STATE_ACTIVE		IMG_UINT64_C(0x2)
 #define RGXFWIF_GPU_UTIL_FWCB_STATE_BLOCKED		IMG_UINT64_C(0x3)
-#define RGXFWIF_GPU_UTIL_FWCB_STATE_MASK               IMG_UINT64_C(0x3000000000000000)
-#define RGXFWIF_GPU_UTIL_FWCB_STATE_SHIFT              (60)
-
-#define RGXFWIF_GPU_UTIL_FWCB_ID_MASK                  IMG_UINT64_C(0x0FFF000000000000)
+#define RGXFWIF_GPU_UTIL_FWCB_STATE_MASK		IMG_UINT64_C(0xC000000000000000)
+#define RGXFWIF_GPU_UTIL_FWCB_STATE_SHIFT		(62)
+#define RGXFWIF_GPU_UTIL_FWCB_ID_MASK			IMG_UINT64_C(0x3FFF000000000000)
 #define RGXFWIF_GPU_UTIL_FWCB_ID_SHIFT			(48)
+#define RGXFWIF_GPU_UTIL_FWCB_TIMER_MASK		IMG_UINT64_C(0x0000FFFFFFFFFFFF)
+#define RGXFWIF_GPU_UTIL_FWCB_TIMER_SHIFT		(0)
 
-#define RGXFWIF_GPU_UTIL_FWCB_CR_TIMER_MASK            IMG_UINT64_C(0x0000FFFFFFFFFFFF)
-#define RGXFWIF_GPU_UTIL_FWCB_OS_TIMER_MASK            IMG_UINT64_C(0x0FFFFFFFFFFFFFFF)
-#define RGXFWIF_GPU_UTIL_FWCB_TIMER_SHIFT              (0)
-
-#define RGXFWIF_GPU_UTIL_FWCB_ENTRY_TYPE(entry)                (((entry)&RGXFWIF_GPU_UTIL_FWCB_TYPE_MASK)>>RGXFWIF_GPU_UTIL_FWCB_TYPE_SHIFT)
 #define RGXFWIF_GPU_UTIL_FWCB_ENTRY_STATE(entry)	(((entry)&RGXFWIF_GPU_UTIL_FWCB_STATE_MASK)>>RGXFWIF_GPU_UTIL_FWCB_STATE_SHIFT)
 #define RGXFWIF_GPU_UTIL_FWCB_ENTRY_ID(entry)		(((entry)&RGXFWIF_GPU_UTIL_FWCB_ID_MASK)>>RGXFWIF_GPU_UTIL_FWCB_ID_SHIFT)
-#define RGXFWIF_GPU_UTIL_FWCB_ENTRY_CR_TIMER(entry)    (((entry)&RGXFWIF_GPU_UTIL_FWCB_CR_TIMER_MASK)>>RGXFWIF_GPU_UTIL_FWCB_TIMER_SHIFT)
-#define RGXFWIF_GPU_UTIL_FWCB_ENTRY_OS_TIMER(entry)    (((entry)&RGXFWIF_GPU_UTIL_FWCB_OS_TIMER_MASK)>>RGXFWIF_GPU_UTIL_FWCB_TIMER_SHIFT)
-
-/* It can never happen that the GPU is reported as powered off and active at the same time,
- * use this combination to mark the entry as reserved */
-#define RGXFWIF_GPU_UTIL_FWCB_RESERVED \
-       ( (RGXFWIF_GPU_UTIL_FWCB_TYPE_POWER_OFF <<  RGXFWIF_GPU_UTIL_FWCB_TYPE_SHIFT) | \
-         (RGXFWIF_GPU_UTIL_FWCB_STATE_ACTIVE_LOW << RGXFWIF_GPU_UTIL_FWCB_STATE_SHIFT) )
+#define RGXFWIF_GPU_UTIL_FWCB_ENTRY_TIMER(entry)	(((entry)&RGXFWIF_GPU_UTIL_FWCB_TIMER_MASK)>>RGXFWIF_GPU_UTIL_FWCB_TIMER_SHIFT)
 
 #define RGXFWIF_GPU_UTIL_FWCB_ENTRY_ADD(cb, crtimer, state) do {														\
 		/* Combine all the information about current state transition into a single 64-bit word */						\
-               (cb)->aui64CB[(cb)->ui32WriteOffset] =                                                                                          \
-                       (((IMG_UINT64)(crtimer) << RGXFWIF_GPU_UTIL_FWCB_TIMER_SHIFT) & RGXFWIF_GPU_UTIL_FWCB_CR_TIMER_MASK) |          \
+		(cb)->aui64CB[(cb)->ui32WriteOffset & RGXFWIF_GPU_UTIL_FWCB_MASK] =												\
+			(((IMG_UINT64)(crtimer) << RGXFWIF_GPU_UTIL_FWCB_TIMER_SHIFT) & RGXFWIF_GPU_UTIL_FWCB_TIMER_MASK) |			\
 			(((IMG_UINT64)(state) << RGXFWIF_GPU_UTIL_FWCB_STATE_SHIFT) & RGXFWIF_GPU_UTIL_FWCB_STATE_MASK) |			\
 			(((IMG_UINT64)(cb)->ui32CurrentDVFSId << RGXFWIF_GPU_UTIL_FWCB_ID_SHIFT) & RGXFWIF_GPU_UTIL_FWCB_ID_MASK);	\
 		/* Make sure the value is written to the memory before advancing write offset */								\
 		RGXFW_MEM_FENCE();																								\
 		/* Advance the CB write offset */																				\
 		(cb)->ui32WriteOffset++;																						\
-                if((cb)->ui32WriteOffset >= RGXFWIF_GPU_UTIL_FWCB_SIZE)                                                                                                                 \
-                {                                                                                                                                                                                                                               \
-                       (cb)->ui32WriteOffset = 0;                                                                                                                                                                          \
-                }                                                                                                                                                                                                                               \
 		/* Cache current transition in cached memory */																	\
 		(cb)->ui32LastGpuUtilState = (state);																			\
 	} while (0)
@@ -412,6 +387,7 @@ typedef enum
 * Core Clock Speed in Hz
 */
 #define RGX_CORE_CLOCK_SPEED_DEFAULT		(400000000)
+
 
 /*!
  ******************************************************************************

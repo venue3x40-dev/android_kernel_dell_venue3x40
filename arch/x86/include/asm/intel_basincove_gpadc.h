@@ -29,38 +29,6 @@
 
 #define GPADC_RSL(channel, res) (res->data[ffs(channel)-1])
 
-#define PMIC_ID_ADDR    0x00
-#define PMIC_VENDOR_ID_MASK     (0x03 << 6)
-#define PMIC_MINOR_REV_MASK     0x07
-#define PMIC_MAJOR_REV_MASK     (0x07 << 3)
-#define BASINCOVE_VENDORID      (0x03 << 6)
-#define SHADYCOVE_VENDORID      0x00
-
-#define PMIC_MAJOR_REV_A0       0x00
-#define PMIC_MAJOR_REV_B0       (0x01 << 3)
-#define PMIC_MINOR_REV_X0       0x00
-#define PMIC_MINOR_REV_X1       (0x01 << 0)
-
-/* Register on I2C-dev2-0x6E */
-#define PMIC_SPARE03_ADDR	0x010B
-#define PMIC_PROVISIONED	(0x01 << 1)
-#define PMIC_PROV_MASK		(0x03 << 0)
-
-enum gpadc_channel_type {
-	PMIC_GPADC_CHANNEL_VBUS = 0,
-	PMIC_GPADC_CHANNEL_BATID,
-	PMIC_GPADC_CHANNEL_PMICTEMP,
-	PMIC_GPADC_CHANNEL_BATTEMP0,
-	PMIC_GPADC_CHANNEL_BATTEMP1,
-	PMIC_GPADC_CHANNEL_SYSTEMP0,
-	PMIC_GPADC_CHANNEL_SYSTEMP1,
-	PMIC_GPADC_CHANNEL_SYSTEMP2,
-	PMIC_GPADC_CHANNEL_USBID,
-	PMIC_GPADC_CHANNEL_PEAK,
-	PMIC_GPADC_CHANNEL_AGND,
-	PMIC_GPADC_CHANNEL_VREF,
-};
-
 struct gpadc_regmap_t {
 	char *name;
 	int cntl;       /* GPADC Conversion Control Bit indicator */

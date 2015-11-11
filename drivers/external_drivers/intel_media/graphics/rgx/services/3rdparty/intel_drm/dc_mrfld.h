@@ -125,10 +125,6 @@ typedef struct {
 
 	struct plane_state plane_states[DC_PLANE_MAX][MAX_PLANE_INDEX];
 
-	/* Timer to retire blocked flips */
-        struct timer_list sFlipTimer;
-        struct work_struct flip_retire_work;
-
 } DC_MRFLD_DEVICE;
 
 typedef struct {
@@ -160,7 +156,6 @@ enum DC_MRFLD_FLIP_STATUS {
 typedef struct {
 	struct list_head sFlips[MAX_PIPE_NUM];
 	IMG_UINT32 eFlipStates[MAX_PIPE_NUM];
-	IMG_UINT32 uiVblankCounters[MAX_PIPE_NUM];
 	struct DC_MRFLD_PIPE_INFO asPipeInfo[MAX_PIPE_NUM];
 	IMG_BOOL bActivePipes[MAX_PIPE_NUM];
 	IMG_UINT32 uiNumBuffers;
@@ -168,7 +163,7 @@ typedef struct {
 	IMG_HANDLE hConfigData;
 	IMG_UINT32 uiSwapInterval;
 	IMG_UINT32 uiPowerIslands;
-	DC_MRFLD_BUFFER *pasBuffers[0];
+	DC_MRFLD_BUFFER asBuffers[0];
 } DC_MRFLD_FLIP;
 
 /*exported functions*/

@@ -337,14 +337,6 @@ PVRSRV_ERROR _SCPCommandReady(SCP_COMMAND *psCommand)
 			sync_fence_put(psCommand->psAcquireFence);
 			psCommand->psAcquireFence = IMG_NULL;
 		}
-		else if (psCommand->psAcquireFence->status < 0)
-		{
-			/* Just take error fence as signaled and send it to display */
-			PVR_DPF((PVR_DBG_WARNING, "%s:AcqureFence[%p] status is error!",
-					__FUNCTION__, psCommand->psAcquireFence));
-			sync_fence_put(psCommand->psAcquireFence);
-			psCommand->psAcquireFence = IMG_NULL;
-		}
 		else
 		{
 			return PVRSRV_ERROR_FAILED_DEPENDENCIES;
@@ -720,7 +712,6 @@ IMG_EXPORT
 PVRSRV_ERROR SCPRun(SCP_CONTEXT *psContext)
 {
 	SCP_COMMAND *psCommand;
-	PVRSRV_ERROR eError = PVRSRV_OK;
 
 	if (psContext == IMG_NULL)
 	{
@@ -730,6 +721,8 @@ PVRSRV_ERROR SCPRun(SCP_CONTEXT *psContext)
 	OSLockAcquire(psContext->hLock);
 	while (psContext->ui32DepOffset != psContext->ui32WriteOffset)
 	{
+		PVRSRV_ERROR eError;
+
 		psCommand = (SCP_COMMAND *)((IMG_UINT8 *)psContext->pvCCB +
 		            psContext->ui32DepOffset);
 
@@ -757,7 +750,7 @@ PVRSRV_ERROR SCPRun(SCP_CONTEXT *psContext)
 	}
 	OSLockRelease(psContext->hLock);
 
-	return eError;
+	return PVRSRV_OK;
 }
 
 IMG_EXPORT
@@ -836,11 +829,6 @@ IMG_VOID SCPCommandComplete(SCP_CONTEXT *psContext)
 				__FUNCTION__, psCommand, psContext, bContinue);
 
 	}
-}
-
-IMG_EXPORT IMG_BOOL SCPHasPendingCommand(SCP_CONTEXT *psContext)
-{
-	return psContext && (psContext->ui32DepOffset != psContext->ui32WriteOffset);
 }
 
 IMG_EXPORT

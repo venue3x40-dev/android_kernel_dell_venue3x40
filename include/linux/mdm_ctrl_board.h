@@ -32,6 +32,16 @@
 #define DEVICE_NAME "modem_control"
 #define DRVNAME "mdm_ctrl"
 
+/* Supported Modem IDs*/
+enum {
+	MODEM_UNSUP,
+	MODEM_6260,
+	MODEM_6268,
+	MODEM_6360,
+	MODEM_7160,
+	MODEM_7260
+};
+
 /* Supported PMIC IDs*/
 enum {
 	PMIC_UNSUP,
@@ -52,6 +62,13 @@ enum {
 	CPU_VVIEW2,
 	CPU_ANNIEDALE,
 	CPU_CHERRYVIEW
+};
+
+/* Configuration types */
+enum {
+	CONF_UNSUP,
+	XMM_CONF_GENERIC,
+	XMM_CONF_M2
 };
 
 struct mdm_ops {
@@ -99,8 +116,8 @@ struct mcd_base_info {
 	struct	pmic_ops pmic;
 	void	*pmic_data;
 
-	/* board type */
-	int		board_type;
+	/* conf info */
+	int		conf_type;
 };
 
 struct sfi_to_mdm {
@@ -121,9 +138,6 @@ int retrieve_modem_platform_data(struct platform_device *pdev);
 int mcd_register_mdm_info(struct mcd_base_info *info,
 			  struct platform_device *pdev);
 
-void mcd_set_mdm(struct mcd_base_info *info, int mdm_ver);
-int mcd_finalize_cpu_data(struct mcd_base_info *mcd_reg_info);
-
 /* struct mcd_cpu_data
  * @gpio_rst_out: Reset out gpio (self reset indicator)
  * @gpio_pwr_on: Power on gpio (ON1 - Power up pin)
@@ -133,8 +147,6 @@ int mcd_finalize_cpu_data(struct mcd_base_info *mcd_reg_info);
  * @irq_reset: RST_BB_N irq
  */
 struct mdm_ctrl_cpu_data {
-	int		entries[4];
-
 	/* GPIOs */
 	char	*gpio_rst_out_name;
 	int		gpio_rst_out;
@@ -145,10 +157,9 @@ struct mdm_ctrl_cpu_data {
 	char	*gpio_cdump_name;
 	int		 gpio_cdump;
 	char	*gpio_wwan_disable_name;
-	char	*gpio_wake_on_wwan_name;
-
-	/* NGFF specific */
 	int		gpio_wwan_disable;
+	char	*gpio_wake_on_wwan_name;
+	int		gpio_wake_on_wwan;
 
 	/* IRQs */
 	int	irq_cdump;

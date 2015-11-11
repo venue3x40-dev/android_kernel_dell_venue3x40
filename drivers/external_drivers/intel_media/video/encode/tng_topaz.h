@@ -21,8 +21,6 @@
 #define _FPGA_TOPAZ_H_
 
 #include "psb_drv.h"
-#include "tng_topaz_hw_reg.h"
-
 
 #define TOPAZ_MTX_REG_SIZE (34 * 4 + 183 * 4)
 
@@ -42,10 +40,8 @@
 	codec == IMG_CODEC_H264_VCM  || \
 	codec == IMG_CODEC_H264_CBR  || \
 	codec == IMG_CODEC_H264_LLRC || \
-	codec == IMG_CODEC_H264_ALL_RC)
-
-#define TNG_IS_H264MVC_ENC(codec) \
-	(codec == IMG_CODEC_H264MVC_NO_RC || \
+	codec == IMG_CODEC_H264_ALL_RC || \
+	codec == IMG_CODEC_H264MVC_NO_RC || \
 	codec == IMG_CODEC_H264MVC_CBR || \
 	codec == IMG_CODEC_H264MVC_VBR)
 

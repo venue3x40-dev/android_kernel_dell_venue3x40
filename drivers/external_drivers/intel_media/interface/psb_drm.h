@@ -186,9 +186,6 @@ union drm_psb_extension_arg {
 	struct drm_psb_extension_rep rep;
 };
 
-#define PSB_NOT_FENCE                (1 << 0)
-#define PSB_MEM_CLFLUSH                (1 << 1)
-
 struct psb_validate_req {
 	uint64_t set_flags;
 	uint64_t clear_flags;
@@ -872,9 +869,9 @@ struct psb_gtt_mapping_arg {
 };
 
 struct drm_psb_getpageaddrs_arg {
-	uint64_t handle;
-	uint64_t page_addrs;
-	uint64_t gtt_offset;
+	uint32_t handle;
+	unsigned long *page_addrs;
+	unsigned long gtt_offset;
 };
 
 
@@ -990,9 +987,6 @@ struct drm_psb_idle_ctrl {
 /****BEGIN HDMI TEST IOCTLS ****/
 #define DRM_PSB_HDMITEST                0x3A
 
-/* GET PANEL ORIENTATION INFO */
-#define DRM_PSB_PANEL_ORIENTATION       0x3B
-
 /* read an hdmi test register */
 #define HT_READ                         1
 /* write an hdmi test register */
@@ -1042,7 +1036,7 @@ typedef struct tagHDMITESTREGREADWRITE {
 struct drm_psb_csc_matrix {
 	int pipe;
 	int64_t matrix[9];
-}__attribute__((packed));
+};
 
 struct psb_drm_dpu_rect {
 	int x, y;
@@ -1136,7 +1130,7 @@ struct drm_psb_csc_gamma_setting {
 		struct csc_setting csc_data;
 		struct gamma_setting gamma_data;
 	} data;
-}__attribute__((packed));
+};
 struct drm_psb_buffer_data {
 	void *h_buffer;
 };

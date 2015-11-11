@@ -73,7 +73,7 @@ int jdi_cmd_drv_ic_init(struct mdfld_dsi_config *dsi_config)
 
 	msleep(120);
 	err = mdfld_dsi_send_mcs_short_hs(sender,
-			write_display_brightness, 0x0, 1,
+			write_display_brightness, 0x4, 1,
 			MDFLD_DSI_SEND_PACKAGE);
 	if (err) {
 		DRM_ERROR("%s: %d: Set Brightness\n",
@@ -99,7 +99,7 @@ int jdi_cmd_drv_ic_init(struct mdfld_dsi_config *dsi_config)
 		goto ic_init_err;
 	}
 
-	if (!IS_ANN(dev)) {
+	if (!IS_ANN_A0(dev)) {
 		err = mdfld_dsi_send_mcs_short_hs(sender,
 				write_cabc_min_bright, 51, 1,
 				MDFLD_DSI_SEND_PACKAGE);
@@ -108,26 +108,25 @@ int jdi_cmd_drv_ic_init(struct mdfld_dsi_config *dsi_config)
 					__func__, __LINE__);
 			goto ic_init_err;
 		}
-	}
+		err = mdfld_dsi_send_gen_short_hs(sender,
+				access_protect, 4, 2,
+				MDFLD_DSI_SEND_PACKAGE);
+		if (err) {
+			DRM_ERROR("%s: %d: Manufacture command protect on\n",
+					__func__, __LINE__);
+			goto ic_init_err;
+		}
 
-	err = mdfld_dsi_send_gen_short_hs(sender,
-			access_protect, 4, 2,
-			MDFLD_DSI_SEND_PACKAGE);
-	if (err) {
-		DRM_ERROR("%s: %d: Manufacture command protect on\n",
-				__func__, __LINE__);
-		goto ic_init_err;
+		err = mdfld_dsi_send_gen_long_lp(sender,
+				jdi_timing_control,
+				21, MDFLD_DSI_SEND_PACKAGE);
+		if (err) {
+			DRM_ERROR("%s: %d: Set panel timing\n",
+					__func__, __LINE__);
+			goto ic_init_err;
+		}
+		msleep(20);
 	}
-
-	err = mdfld_dsi_send_gen_long_lp(sender,
-			jdi_timing_control,
-			21, MDFLD_DSI_SEND_PACKAGE);
-	if (err) {
-		DRM_ERROR("%s: %d: Set panel timing\n",
-				__func__, __LINE__);
-		goto ic_init_err;
-	}
-	msleep(20);
 
 	err = mdfld_dsi_send_mcs_short_hs(sender,
 			set_tear_on, 0x00, 1,
@@ -234,7 +233,7 @@ void jdi_cmd_controller_init(
 	hw_ctx->cck_div = 1;
 	hw_ctx->pll_bypass_mode = 0;
 
-	if (IS_ANN(dev)) {
+	if (IS_ANN_A0(dev)) {
 		hw_ctx->mipi_control = 0x18;
 		hw_ctx->intr_en = 0xFFFFFFFF;
 		hw_ctx->hs_tx_timeout = 0xFFFFFF;
@@ -468,7 +467,7 @@ int jdi_cmd_set_brightness(
 		return -EINVAL;
 	}
 
-	duty_val = (0xFF * level) / 255;
+	duty_val = (0xFF * level) / 100;
 	mdfld_dsi_send_mcs_short_hs(sender,
 			write_display_brightness, duty_val, 1,
 			MDFLD_DSI_SEND_PACKAGE);
@@ -611,8 +610,8 @@ void jdi_cmd_get_panel_info(int pipe,
 	PSB_DEBUG_ENTRY("\n");
 
 	if (pipe == 0) {
-		pi->width_mm = 56;
-		pi->height_mm = 99;
+		pi->width_mm = PANEL_4DOT3_WIDTH;
+		pi->height_mm = PANEL_4DOT3_HEIGHT;
 	}
 }
 

@@ -24,7 +24,6 @@
 #define SIGNED_RECOVERY_ATTR	0x0C
 #define SIGNED_POS_ATTR		0x0E
 #define SIGNED_FACTORY_ATTR	0x12
-#define SIGNED_FACTORY2_ATTR	0x18
 
 enum intel_scu_ipc_wake_src {
 	WAKE_BATT_INSERT,
@@ -112,7 +111,7 @@ int intel_scu_ipc_set_osc_clk0(unsigned int enable, enum clk0_mode mode);
 int intel_scu_ipc_msic_vprog1(int on);
 int intel_scu_ipc_msic_vprog2(int on);
 int intel_scu_ipc_msic_vprog3(int on);
-
+int intel_scu_ipc_read_msic_vprog2_reg(void);
 /* OSHOB-OS Handoff Buffer read */
 phys_addr_t intel_scu_ipc_get_oshob_base(void);
 int intel_scu_ipc_get_oshob_size(void);

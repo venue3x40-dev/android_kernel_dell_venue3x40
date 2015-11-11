@@ -44,39 +44,33 @@ enum {
 	host_wake_acpi_idx
 };
 #endif
-#define LPM_ON
 
 static struct rfkill *bt_rfkill;
 static bool bt_enabled;
-
-#ifdef LPM_ON
-static bool host_wake_uart_enabled;
 static bool wake_uart_enabled;
 static bool int_handler_enabled;
-#endif
 
+#define LPM_ON
 
 static void activate_irq_handler(void);
 
 struct bcm_bt_lpm {
-#ifdef LPM_ON
 	unsigned int gpio_wake;
 	unsigned int gpio_host_wake;
 	unsigned int int_host_wake;
-#endif
 	unsigned int gpio_enable_bt;
-#ifdef LPM_ON
+
 	int wake;
 	int host_wake;
-#endif
+
 	struct hrtimer enter_lpm_timer;
 	ktime_t enter_lpm_delay;
 
 	struct device *tty_dev;
-#ifdef LPM_ON
+
 	struct wake_lock wake_lock;
 	char wake_lock_name[100];
-#endif
+
 	int port;
 } bt_lpm;
 
@@ -167,14 +161,13 @@ static int bcm43xx_bt_rfkill_set_power(void *data, bool blocked)
 	/* rfkill_ops callback. Turn transmitter on when blocked is false */
 
 	if (!blocked) {
-#ifdef LPM_ON
 		gpio_set_value(bt_lpm.gpio_wake, 1);
 		/*
 		* Delay advice by BRCM is min 2.5ns,
 		* setting it between 10 and 50us for more confort
 		*/
 		usleep_range(10, 50);
-#endif
+
 		gpio_set_value(bt_lpm.gpio_enable_bt, 1);
 		pr_debug("%s: turn BT on\n", __func__);
 	} else {
@@ -200,6 +193,7 @@ static void set_wake_locked(int wake)
 		wake_unlock(&bt_lpm.wake_lock);
 
 	if (!wake_uart_enabled && wake) {
+		wake_uart_enabled = 1;
 		WARN_ON(!bt_lpm.tty_dev);
 		uart_enable(bt_lpm.tty_dev);
 	}
@@ -207,10 +201,11 @@ static void set_wake_locked(int wake)
 	gpio_set_value(bt_lpm.gpio_wake, wake);
 
 	if (wake_uart_enabled && !wake) {
+		wake_uart_enabled = 0;
 		WARN_ON(!bt_lpm.tty_dev);
 		uart_disable(bt_lpm.tty_dev);
 	}
-	wake_uart_enabled = wake;
+
 }
 
 static enum hrtimer_restart enter_lpm(struct hrtimer *timer)
@@ -232,12 +227,14 @@ static void update_host_wake_locked(int host_wake)
 
 	if (host_wake) {
 		wake_lock(&bt_lpm.wake_lock);
-		if (!host_wake_uart_enabled) {
+		if (!wake_uart_enabled) {
+			wake_uart_enabled = 1;
 			WARN_ON(!bt_lpm.tty_dev);
 			uart_enable(bt_lpm.tty_dev);
 		}
 	} else  {
-		if (host_wake_uart_enabled) {
+		if (wake_uart_enabled) {
+			wake_uart_enabled = 0;
 			WARN_ON(!bt_lpm.tty_dev);
 			uart_disable(bt_lpm.tty_dev);
 		}
@@ -249,7 +246,6 @@ static void update_host_wake_locked(int host_wake)
 		wake_lock_timeout(&bt_lpm.wake_lock, HZ/2);
 	}
 
-	host_wake_uart_enabled = host_wake;
 
 }
 
@@ -380,13 +376,13 @@ static int bcm43xx_bluetooth_pdata_probe(struct platform_device *pdev)
 		pr_err("%s: gpio not valid\n", __func__);
 		return -EINVAL;
 	}
-
+#endif
 
 	bt_lpm.gpio_wake = pdata->gpio_wake;
 	bt_lpm.gpio_host_wake = pdata->gpio_host_wake;
 	bt_lpm.int_host_wake = pdata->int_host_wake;
-#endif
 	bt_lpm.gpio_enable_bt = pdata->gpio_enable;
+
 	bt_lpm.port = pdata->port;
 
 	return 0;
@@ -397,9 +393,9 @@ static int bcm43xx_bluetooth_probe(struct platform_device *pdev)
 {
 	bool default_state = true;	/* off */
 	int ret = 0;
-#ifdef LPM_ON
+
 	int_handler_enabled = false;
-#endif
+
 #ifdef CONFIG_ACPI
 	if (ACPI_HANDLE(&pdev->dev)) {
 		/*

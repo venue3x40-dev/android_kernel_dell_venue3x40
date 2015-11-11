@@ -101,5 +101,4 @@ extern void mdfld_reset_panel_handler_work(struct work_struct *work);
 extern void mdfld_dbi_update_panel(struct drm_device *dev, int pipe);
 extern int __dbi_power_on(struct mdfld_dsi_config *dsi_config);
 extern int __dbi_power_off(struct mdfld_dsi_config *dsi_config);
-uint32_t calculate_dbi_bw_ctrl(const uint32_t lane_count);
 #endif /*__MDFLD_DSI_DBI_H__*/

@@ -47,6 +47,12 @@
 #define WM8994_NUM_DRC 3
 #define WM8994_NUM_EQ  3
 
+//start for cit by fjz 
+#ifdef CONFIG_SWITCH
+extern void mid_headset_report(int state);
+#endif
+//end
+
 static struct {
 	unsigned int reg;
 	unsigned int mask;
@@ -94,7 +100,7 @@ static int wm8994_retune_mobile_base[] = {
 
 static const struct wm8958_micd_rate micdet_rates[] = {
 	{ 32768,       true,  1, 4 },
-	{ 32768,       false, 1, 0 },
+	{ 32768,       false, 1, 4 },
 	{ 44100 * 256, true,  7, 10 },
 	{ 44100 * 256, false, 7, 9 },
 };
@@ -679,6 +685,7 @@ SOC_SINGLE_TLV("AIF2 EQ4 Volume", WM8994_AIF2_EQ_GAINS_2, 11, 31, 0,
 	       eq_tlv),
 SOC_SINGLE_TLV("AIF2 EQ5 Volume", WM8994_AIF2_EQ_GAINS_2, 6, 31, 0,
 	       eq_tlv),
+SND_SOC_BYTES("AIF1.1 DAC1 EQ Bank", WM8994_AIF1_DAC1_EQ_BAND_1_A, 19),
 };
 
 static const struct snd_kcontrol_new wm8994_drc_controls[] = {
@@ -714,6 +721,16 @@ SOC_SINGLE_TLV("AIF3 Boost Volume", WM8958_AIF3_CONTROL_2, 10, 3, 0, aif_tlv),
 
 SOC_SINGLE("AIF1DAC1 Noise Gate Switch", WM8958_AIF1_DAC1_NOISE_GATE,
 	   WM8958_AIF1DAC1_NG_ENA_SHIFT, 1, 0),
+SOC_SINGLE("AIF1DAC1L Switch", WM8994_POWER_MANAGEMENT_5,
+	   WM8994_AIF1DAC1L_ENA_SHIFT, 1, 0),
+SOC_SINGLE("AIF1DAC1R Switch", WM8994_POWER_MANAGEMENT_5,
+	   WM8994_AIF1DAC1R_ENA_SHIFT, 1, 0),
+SOC_SINGLE("AIF1DAC2L Switch", WM8994_POWER_MANAGEMENT_5,
+	   WM8994_AIF1DAC2L_ENA_SHIFT, 1, 0),
+SOC_SINGLE("AIF1DAC2R Switch", WM8994_POWER_MANAGEMENT_5,
+       WM8994_AIF1DAC2R_ENA_SHIFT, 1, 0),
+
+
 SOC_ENUM("AIF1DAC1 Noise Gate Hold Time", wm8958_aif1dac1_ng_hold),
 SOC_SINGLE_TLV("AIF1DAC1 Noise Gate Threshold Volume",
 	       WM8958_AIF1_DAC1_NOISE_GATE, WM8958_AIF1DAC1_NG_THR_SHIFT,
@@ -2318,7 +2335,7 @@ static int _wm8994_set_fll(struct snd_soc_codec *codec, int id, int src,
 
 		if (wm8994->fll_locked_irq) {
 			timeout = wait_for_completion_timeout(&wm8994->fll_locked[id],
-							      msecs_to_jiffies(12));
+							      msecs_to_jiffies(10));
 			if (timeout == 0)
 				dev_warn(codec->dev,
 					 "Timed out waiting for FLL lock\n");
@@ -2354,6 +2371,8 @@ out:
 	 * If SYSCLK will be less than 50kHz adjust AIFnCLK dividers
 	 * for detection.
 	 */
+	dev_dbg(codec->dev, "line(%d): aifclk1(%d), aif2clk(%d) aifdiv(%d)\n", 
+			__LINE__,wm8994->aifclk[0], wm8994->aifclk[1], wm8994->aifdiv[0]);	 
 	if (max(wm8994->aifclk[0], wm8994->aifclk[1]) < 50000 &&
 		!wm8994->aifdiv[0]) {
 		dev_dbg(codec->dev, "Configuring AIFs for 128fs\n");
@@ -2430,10 +2449,18 @@ static int wm8994_set_dai_sysclk(struct snd_soc_dai *dai,
 		wm8994->mclk[1] = freq;
 		dev_dbg(dai->dev, "AIF%d using MCLK2 at %uHz\n",
 			dai->id, freq);
+		
+		//Setup 8kHz 128fs for Mic detect
+		if(freq == 32768) 
+			snd_soc_update_bits(codec, WM8994_AIF1_RATE, WM8994_AIF1_SR_MASK|WM8994_AIF1CLK_RATE_MASK ,
+						0 << WM8994_AIF1_SR_SHIFT | 1 <<  WM8994_AIF1CLK_RATE_SHIFT);		
 		break;
 
 	case WM8994_SYSCLK_FLL1:
 		wm8994->sysclk[dai->id - 1] = WM8994_SYSCLK_FLL1;
+		snd_soc_update_bits(codec, WM8994_AIF1_RATE, WM8994_AIF1_SR_MASK|WM8994_AIF1CLK_RATE_MASK ,
+						8 << WM8994_AIF1_SR_SHIFT | 3 <<  WM8994_AIF1CLK_RATE_SHIFT);
+		wm8994->aifdiv[0] = 3;		
 		dev_dbg(dai->dev, "AIF%d using FLL1\n", dai->id);
 		break;
 
@@ -2471,6 +2498,8 @@ static int wm8994_set_dai_sysclk(struct snd_soc_dai *dai,
 	 * If SYSCLK will be less than 50kHz adjust AIFnCLK dividers
 	 * for detection.
 	 */
+	dev_dbg(codec->dev, "line(%d): aifclk1(%d), aif2clk(%d) aifdiv(%d)\n", 
+			__LINE__,wm8994->aifclk[0], wm8994->aifclk[1], wm8994->aifdiv[0]);	 
 	if (max(wm8994->aifclk[0], wm8994->aifclk[1]) < 50000) {
 		dev_dbg(codec->dev, "Configuring AIFs for 128fs\n");
 
@@ -2503,7 +2532,7 @@ static int wm8994_set_bias_level(struct snd_soc_codec *codec,
 {
 	struct wm8994_priv *wm8994 = snd_soc_codec_get_drvdata(codec);
 	struct wm8994 *control = wm8994->wm8994;
-
+	dev_dbg(codec->dev, "%s(%d): level(%d)\n",__func__, __LINE__, level);
 	wm_hubs_set_bias_level(codec, level);
 
 	switch (level) {
@@ -2942,8 +2971,8 @@ static int wm8994_hw_params(struct snd_pcm_substream *substream,
 		best = i;
 		best_val = cur_val;
 	}
-	dev_dbg(dai->dev, "Selected AIF%dCLK/fs = %d\n",
-		dai->id, fs_ratios[best]);
+	dev_dbg(dai->dev, "Selected AIF%dCLK/fs = %d(%d)\n",
+		dai->id, fs_ratios[best], best);
 	rate_val |= best;
 
 	/* We may not get quite the right frequency if using
@@ -3966,7 +3995,7 @@ static void wm8958_mic_work(struct work_struct *work)
 						  struct wm8994_priv,
 						  mic_complete_work.work);
 	struct snd_soc_codec *codec = wm8994->hubs.codec;
-
+	int reg = 0;
 	dev_crit(codec->dev, "MIC WORK %x\n", wm8994->mic_status);
 
 	pm_runtime_get_sync(codec->dev);
@@ -3978,6 +4007,14 @@ static void wm8958_mic_work(struct work_struct *work)
 	mutex_unlock(&wm8994->accdet_lock);
 
 	pm_runtime_put(codec->dev);
+
+	reg = snd_soc_read(codec, WM8994_INTERRUPT_STATUS_2);
+	if(unlikely(reg & WM8994_MIC1_DET_EINT)) {
+		//Normally, the IRQ flag will be cleaned immediately before the IRQ was handled,
+		dev_crit(codec->dev, "MIC IRQ flag still exist (731h = 0x%x), clear it.\n", reg);
+		snd_soc_update_bits(codec, WM8994_INTERRUPT_STATUS_2,
+							WM8994_MIC1_DET_EINT_MASK, WM8994_MIC1_DET_EINT_MASK);
+	}
 
 	dev_crit(codec->dev, "MIC WORK %x DONE\n", wm8994->mic_status);
 }
@@ -4015,6 +4052,7 @@ static irqreturn_t wm8958_mic_irq(int irq, void *data)
 	 * with an update of the MICDET status; if so it will have
 	 * stopped detection and we can ignore this interrupt.
 	 */
+
 	if (!(snd_soc_read(codec, WM8958_MIC_DETECT_1) & WM8958_MICD_ENA))
 		return IRQ_HANDLED;
 
@@ -4072,6 +4110,11 @@ static irqreturn_t wm8958_mic_irq(int irq, void *data)
 		wm8994->jack_mic = false;
 		wm8994->headphone_detected = false;
 		wm8994->mic_detecting = true;
+		//start by fjz	jack removed 
+#ifdef CONFIG_SWITCH 
+		mid_headset_report(0);
+#endif 
+		//end 
 		goto out;
 	}
 
@@ -4082,6 +4125,19 @@ static irqreturn_t wm8958_mic_irq(int irq, void *data)
 		if (control->type == WM8958) {
 			/* Set mic-bias high during detection phase (micb_en_delay) */
 			/* 0 == Continuous */
+			//start by fjz for cit test for  P802_P000197
+			#ifdef CONFIG_SWITCH 
+			//reference the function wm8958_custom_mic_id 
+			if(wm8994->mic_status & 0x600){
+			
+				mid_headset_report(1);
+			}
+			else if(wm8994->mic_status & 0xfc ){
+			
+				mid_headset_report(2);
+			} 
+			#endif
+			//endif 
 			dev_dbg(codec->dev, "Set MICBIAS High, for micb_en_delay time\n");
 			snd_soc_update_bits(codec, WM8958_MIC_DETECT_1,
 				    WM8958_MICD_BIAS_STARTTIME_MASK |
@@ -4521,18 +4577,6 @@ static int wm8994_codec_probe(struct snd_soc_codec *codec)
 			    WM8994_IM_FIFOS_ERR_EINT_MASK,
 			    1 << WM8994_IM_FIFOS_ERR_EINT_SHIFT);
 
-	/* Enable bandgap-VREFC */
-	/* Note: VREFC is required for jack detection in
-	 * low power jack detect mode */
-	/* TODO: get the hardcoded reg value macro name and the regmap sync
-	   issue resolved with the wolfson folks  */
-	snd_soc_write(codec, 0x102, 0x3);
-	regcache_sync_region(wm8994->wm8994->regmap, 0x102, 0x102);
-	snd_soc_write(codec, 0xCB, 0x3921);
-	regcache_sync_region(wm8994->wm8994->regmap, 0xCB, 0xCB);
-	snd_soc_write(codec, 0x102, 0x0);
-	regcache_sync_region(wm8994->wm8994->regmap, 0x102, 0x102);
-
 	return 0;
 
 err_irq:
@@ -4661,14 +4705,7 @@ static int wm8994_suspend(struct device *dev)
 
 		if (!(wm8994->jack_mic) && !(wm8994->headphone_detected)) {
 
-			dev_dbg(codec->dev, "Disable MIC Detection!!!\n");
-			snd_soc_update_bits(codec, WM8958_MIC_DETECT_1,
-						WM8958_MICD_ENA, 0);
-
-			snd_soc_dapm_disable_pin(&codec->dapm, "CLK_SYS");
-			snd_soc_dapm_sync(&codec->dapm);
-
-			dev_dbg(codec->dev, "Jack not connected..Mask interrupts\n");
+			dev_dbg(codec->dev, "Jack not connected..Mask interrupt\n");
 			snd_soc_write(codec, WM8994_INTERRUPT_CONTROL, 0x01);
 
 			ret = regcache_sync_region(wm8994->wm8994->regmap,
@@ -4677,6 +4714,13 @@ static int wm8994_suspend(struct device *dev)
 			if (ret != 0)
 				dev_err(dev, "Failed to sync register: %d\n", ret);
 			synchronize_irq(control->irq);
+
+			dev_dbg(codec->dev, "Disable MIC Detection!!!\n");
+			snd_soc_update_bits(codec, WM8958_MIC_DETECT_1,
+						WM8958_MICD_ENA, 0);
+
+			snd_soc_dapm_disable_pin(&codec->dapm, "CLK_SYS");
+			snd_soc_dapm_sync(&codec->dapm);
 		}
 	}
 
@@ -4696,16 +4740,13 @@ static int wm8994_resume(struct device *dev)
 
 	/* Enable the MIC Detection when resumed */
 	if ((control->type == WM8958) && wm8994->mic_id_cb) {
-
-		dev_dbg(codec->dev, "Unmask interrupts..\n");
-		snd_soc_write(codec, WM8994_INTERRUPT_CONTROL, 0x00);
-
+		dev_dbg(codec->dev, "Enable MIC Detection!!!\n");
 		snd_soc_dapm_force_enable_pin(&codec->dapm, "CLK_SYS");
 		snd_soc_dapm_sync(&codec->dapm);
 
-		dev_dbg(codec->dev, "Enable MIC Detection!!!\n");
 		snd_soc_update_bits(codec, WM8958_MIC_DETECT_1,
 					WM8958_MICD_ENA, WM8958_MICD_ENA);
+		snd_soc_write(codec, WM8994_INTERRUPT_CONTROL, 0x00);
 	}
 
 	return 0;

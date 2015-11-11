@@ -919,7 +919,6 @@ int mdfld_dsi_output_init(struct drm_device *dev,
 	dsi_config->dev = dev;
 
 	/*init fixed mode basing on DSI config type*/
-	dsi_panel_info.panel_180_rotation = false;
 	if (dsi_config->type == MDFLD_DSI_ENCODER_DBI) {
 		dsi_config->fixed_mode = p_funcs->get_config_mode();
 		p_funcs->get_panel_info(pipe, &dsi_panel_info);
@@ -930,7 +929,6 @@ int mdfld_dsi_output_init(struct drm_device *dev,
 
 	width_mm = dsi_panel_info.width_mm;
 	height_mm = dsi_panel_info.height_mm;
-	dev_priv->panel_180_rotation = dsi_panel_info.panel_180_rotation;
 
 	dsi_config->mode = dsi_config->fixed_mode;
 	dsi_config->connector = dsi_connector;
@@ -1082,7 +1080,6 @@ void mdfld_dsi_set_drain_latency(struct drm_encoder *encoder,
 	ctx = &dsi_config->dsi_hw_context;
 	if (dsi_config->pipe == 0) {
 		mutex_lock(&dsi_config->context_lock);
-#if 0
 		if ((mode->hdisplay == 720) && (mode->vdisplay == 1280))
 			drain_rate = ACTUAL_DRAIN_RATE_7x12;
 		else if ((mode->hdisplay == 1080) && (mode->vdisplay == 1920))
@@ -1096,22 +1093,7 @@ void mdfld_dsi_set_drain_latency(struct drm_encoder *encoder,
 			ctx->ddl2 = value | (HDMI_OVERLAY_DEADLINE << 8);
 			ctx->ddl3 = 0;
 			ctx->ddl4 = value | (value << 8);
-			ctx->ddl1 = 0x83838383;
-			ctx->ddl2 = 0x83838383;
-			ctx->ddl3 = 0x83;
-			ctx->ddl4 = 0x8383;
-
 		}
-#endif
-		ctx->ddl1 = 0x86868686;
-		ctx->ddl2 = 0x86868686;
-		ctx->ddl3 = 0x86;
-		ctx->ddl4 = 0x8686;
-
-		/* init for 1st boot, 12KB for plane A D E F */
-		ctx->dsparb = 0xc0300c0;
-		ctx->dsparb2 = 0x90180;
-
 		mutex_unlock(&dsi_config->context_lock);
 	}
 

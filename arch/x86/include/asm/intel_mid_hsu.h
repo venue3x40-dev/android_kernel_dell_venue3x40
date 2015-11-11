@@ -3,14 +3,6 @@
 
 #define hsu_port_func_max 4
 
-enum hsu_core {
-	hsu_pnw,
-	hsu_clv,
-	hsu_tng,
-	hsu_vlv2,
-	hsu_chv,
-};
-
 enum {
 	hsu_port0,
 	hsu_port1,
@@ -64,7 +56,6 @@ void intel_mid_hsu_suspend(int port, struct device *dev,
 void intel_mid_hsu_resume(int port, struct device *dev);
 void intel_mid_hsu_rts(int port, int value);
 void intel_mid_hsu_switch(int port);
-int intel_mid_hsu_plat_init(int port, ulong plat, struct device *dev);
 int intel_mid_hsu_init(struct device *dev, int port);
 int intel_mid_hsu_func_to_port(unsigned int func);
 unsigned int intel_mid_hsu_get_clk(void);

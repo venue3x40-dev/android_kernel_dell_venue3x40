@@ -16,10 +16,7 @@ config SND_COMPRESS_OFFLOAD
 	tristate
 
 config SND_EFFECTS_OFFLOAD
-	bool "Effect Offload Support"
-	default n
-	help
-	Say Y here to enable the Effect Offload.
+	tristate
 
 # To be effective this also requires INPUT - users should say:
 #    select SND_JACK if INPUT=y || INPUT=SND

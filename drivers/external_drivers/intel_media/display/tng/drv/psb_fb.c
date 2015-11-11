@@ -441,26 +441,23 @@ static int psbfb_create(struct psb_fbdev *fbdev,
 		MDFLD_DSI_ENCODER_WITH_DRM_ENABLE(dev_priv->encoder0);
 	struct mdfld_dsi_config *dsi_config =
 		mdfld_dsi_encoder_get_config(dsi_encoder);
-	struct drm_display_mode *fixed_mode;
-
-	if (!dsi_config) {
-		DRM_ERROR("Failed to get encoder config\n");
-		return -EINVAL;
-	}
-
-	fixed_mode = dsi_config->fixed_mode;
+	struct drm_display_mode *fixed_mode = dsi_config->fixed_mode;
 
 	/* PR2 panel must have 200 pixel dummy clocks,
 	 * So the display timing should be 800x1024, and surface
 	 * is 608x1024(64 bits align), or the information between android
 	 * and Linux frame buffer is not consistent.
 	 */
-
+#if 0
 	if (get_panel_type(dev, 0) == TMD_6X10_VID)
-		mode_cmd.width = fixed_mode->hdisplay - 200;
+		mode_cmd.width = sizes->surface_width - 200;
 	else
+		mode_cmd.width = sizes->surface_width;
+		mode_cmd.height = sizes->surface_height;
+#else
 		mode_cmd.width = fixed_mode->hdisplay;
-	mode_cmd.height = fixed_mode->vdisplay;
+		mode_cmd.height = fixed_mode->vdisplay;
+#endif
 
 	mode_cmd.pitches[0] = mode_cmd.width * (sizes->surface_bpp >> 3);
 
@@ -520,10 +517,10 @@ static int psbfb_create(struct psb_fbdev *fbdev,
 
 	if (get_panel_type(dev, 0) == TMD_6X10_VID)
 		drm_fb_helper_fill_var(info, &fbdev->psb_fb_helper,
-				       fixed_mode->hdisplay - 200, fixed_mode->vdisplay);
+				       sizes->fb_width - 200, sizes->fb_height);
 	else
 		drm_fb_helper_fill_var(info, &fbdev->psb_fb_helper,
-				       fixed_mode->hdisplay, fixed_mode->vdisplay);
+				       sizes->fb_width, sizes->fb_height);
 
 	info->fix.mmio_start = pci_resource_start(dev->pdev, 0);
 	info->fix.mmio_len = pci_resource_len(dev->pdev, 0);
@@ -738,7 +735,7 @@ static int psb_create_backlight_property(struct drm_device *dev)
 		return 0;
 	}
 	backlight->values[0] = 0;
-	backlight->values[1] = 255;
+	backlight->values[1] = 100;
 
 	dev_priv->backlight_property = backlight;
 

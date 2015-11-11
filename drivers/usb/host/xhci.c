@@ -2931,6 +2931,7 @@ void xhci_endpoint_reset(struct usb_hcd *hcd,
 		xhci_ring_cmd_db(xhci);
 	}
 	virt_ep->stopped_td = NULL;
+	virt_ep->stopped_trb = NULL;
 	virt_ep->stopped_stream = 0;
 	spin_unlock_irqrestore(&xhci->lock, flags);
 
@@ -3621,22 +3622,14 @@ int xhci_alloc_dev(struct usb_hcd *hcd, struct usb_device *udev)
 #endif
 	unsigned long flags;
 	int timeleft;
-	int ret, count = 0;
+	int ret;
 	union xhci_trb *cmd_trb;
-
-	if (xhci->xhc_state & XHCI_STATE_HALTED)
-		return -EFAULT;
 
 	/* Need to wait xhci->cmd_ring_state to be RUNNING before
 	 * issue ENABLE_SLOT command.
 	 */
-	while (!(xhci->cmd_ring_state & CMD_RING_STATE_RUNNING)) {
-		if (count++ > XHCI_WAIT_CMD_RING_READY_TIMEOUT) {
-			xhci_err(xhci, "%s: cmd ring can't get ready.\n", __func__);
-			return -EFAULT;
-		}
+	while (!(xhci->cmd_ring_state & CMD_RING_STATE_RUNNING))
 		msleep(200);
-	}
 
 	spin_lock_irqsave(&xhci->lock, flags);
 	cmd_trb = xhci_find_next_enqueue(xhci->cmd_ring);
@@ -3794,13 +3787,6 @@ int xhci_address_device(struct usb_hcd *hcd, struct usb_device *udev)
 	if (timeleft <= 0) {
 		xhci_warn(xhci, "%s while waiting for address device command\n",
 				timeleft == 0 ? "Timeout" : "Signal");
-		xhci_dbg(xhci, "xhci registers:\n");
-		xhci_print_registers(xhci);
-		xhci_dbg(xhci, "Command ring:\n");
-		xhci_debug_ring(xhci, xhci->cmd_ring);
-		xhci_dbg(xhci, "Event ring:\n");
-		xhci_debug_ring(xhci, xhci->event_ring);
-
 		/* cancel the address device command */
 		ret = xhci_cancel_cmd(xhci, NULL, cmd_trb);
 		if (ret < 0)

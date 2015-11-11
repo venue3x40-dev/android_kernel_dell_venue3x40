@@ -282,10 +282,10 @@ bool otm_hdmi_power_rails_on(void);
 bool otm_hdmi_power_rails_off(void);
 
 /* turn HDMI power islands on */
-bool otm_hdmi_power_islands_on(void);
+bool otm_hdmi_power_islands_on();
 
 /* turn HDMI power islands off */
-void otm_hdmi_power_islands_off(void);
+void otm_hdmi_power_islands_off();
 
 /* enable/disable IRQ and CPD_HPD */
 bool otm_hdmi_enable_hpd(bool enable);

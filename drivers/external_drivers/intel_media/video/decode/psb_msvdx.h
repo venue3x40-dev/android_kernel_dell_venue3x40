@@ -55,6 +55,7 @@ int psb_msvdx_init(struct drm_device *dev);
 int psb_msvdx_uninit(struct drm_device *dev);
 int psb_msvdx_core_reset(struct drm_psb_private *dev_priv);
 
+int tng_msvdx_fw_init(uint8_t *name,struct drm_device *dev);
 int psb_msvdx_post_init(struct drm_device *dev);
 
 /* TODO: psb_msvdx_reset is used for the case of fw loading by driver
@@ -265,8 +266,6 @@ struct msvdx_private {
 	struct ttm_buffer_object *term_buf;
 	uint32_t term_buf_addr;
 #endif
-
-	atomic_t vc1_workaround_ctx;
 };
 
 struct psb_msvdx_cmd_queue {

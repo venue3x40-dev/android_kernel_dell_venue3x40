@@ -90,8 +90,6 @@ module_param(debug, int, 0600);
 #define MAX_MTU 32768 /* In specification 3GPP TS 27.010, 5.7.2 */
 #define	GSM_NET_TX_TIMEOUT (HZ*10)
 
-#define TX_SIZE		4096
-
 /**
  *	struct gsm_mux_net	-	network interface
  *	@struct gsm_dlci* dlci
@@ -135,7 +133,7 @@ struct gsm_dlci {
 #define DLCI_OPENING		1	/* Sending SABM not seen UA */
 #define DLCI_OPEN		2	/* SABM/UA complete */
 #define DLCI_CLOSING		3	/* Sending DISC not seen UA/DM */
-#define DLCI_HANGUP		4	/* HANGUP received  */
+#define DLCI_HANGUP		4	/*HANGUP received  */
 	struct kref ref;		/* freed from port or mux close */
 
 	spinlock_t gsmtty_lock;		/* Process multiple open of gsmtty */
@@ -159,7 +157,6 @@ struct gsm_dlci {
 	/* Flow control */
 	int throttled;		/* Private copy of throttle state */
 	int constipated;	/* Throttle status for outgoing */
-	int need_tty_wakeup;	/* If wakeup of TTY is needed */
 	/* Packetised I/O */
 	struct sk_buff *skb;	/* Frame being sent */
 	struct sk_buff_head skb_list;	/* Queued frames */
@@ -964,10 +961,6 @@ static void gsm_dlci_data_sweep(struct gsm_mux *gsm)
 			len = gsm_dlci_data_output_framed(gsm, dlci);
 		if (len < 0)
 			break;
-		if (dlci->need_tty_wakeup) {
-			tty_port_tty_wakeup(&dlci->port);
-			dlci->need_tty_wakeup = 0;
-		}
 		/* DLCI empty - try the next */
 		if (len == 0)
 			i++;
@@ -1678,7 +1671,7 @@ static struct gsm_dlci *gsm_dlci_alloc(struct gsm_mux *gsm, int addr)
 	kref_init(&dlci->ref);
 	mutex_init(&dlci->mutex);
 	dlci->fifo = &dlci->_fifo;
-	if (kfifo_alloc(&dlci->_fifo, TX_SIZE, GFP_KERNEL) < 0) {
+	if (kfifo_alloc(&dlci->_fifo, 4096, GFP_KERNEL) < 0) {
 		kfree(dlci);
 		return NULL;
 	}
@@ -3045,6 +3038,8 @@ struct tty_ldisc_ops tty_ldisc_packet = {
  *	Virtual tty side
  */
 
+#define TX_SIZE		512
+
 static int gsmtty_modem_update(struct gsm_dlci *dlci, u8 brk)
 {
 	u8 modembits[5];
@@ -3287,12 +3282,8 @@ static int gsmtty_write(struct tty_struct *tty, const unsigned char *buf,
 
 	if (dlci->state != DLCI_OPEN)
 		return -ENXIO;
-
 	/* Stuff the bytes into the fifo queue */
 	sent = kfifo_in_locked(dlci->fifo, buf, len, &dlci->lock);
-	if (!sent)
-		dlci->need_tty_wakeup = 1;
-
 	/* Need to kick the channel */
 	gsm_dlci_data_kick(dlci);
 	return sent;
