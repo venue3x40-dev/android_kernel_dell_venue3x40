@@ -1,9 +1,8 @@
 # Makefile for the drm device driver. This driver provides support for the
 # Direct Rendering Infrastructure (DRI) in XFree86 4.1.0 and higher.
-# DRIVER_NAME := pvrrgx
-DRIVER_NAME := tngdisp
+DRIVER_NAME := pvrrgx
 
-obj-m += $(DRIVER_NAME).o
+obj-$(DRM_MRFLD) += $(DRIVER_NAME).o
 
 KERNELDIR ?= $(ANDROID_BUILD_TOP)/$(KERNEL_SRC_DIR)
 
