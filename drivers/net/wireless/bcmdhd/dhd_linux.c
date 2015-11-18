@@ -3338,12 +3338,12 @@ dhd_attach(osl_t *osh, struct dhd_bus *bus, uint bus_hdrlen)
 		strncpy(nv_path, nvram_path, sizeof(nv_path) -1);
 	}
 	
-	if (strlen(nvram_path) == 0 || nvram_path[strlen(nvram_path) -1] == '/') {
+	if (strlen(nvram_path) == 0 || (strlen(nv_path) && nv_path[strlen(nv_path) -1] == '/')) {
 		nv_auto_name = 1;
 		if (strlen(nv_id)!=0) {
-				snprintf(nv_path, sizeof(nv_path), "%sbcmdhd_%s.cal", nvram_path, nv_id);
+				snprintf(nv_path, sizeof(nv_path), "%sbcmdhd_%s.cal", nv_path, nv_id);
 		} else {
-				snprintf(nv_path, sizeof(nv_path), "%sbcmdhd.cal", nvram_path);
+				snprintf(nv_path, sizeof(nv_path), "%sbcmdhd.cal", nv_path);
 		}
 		nv_path[sizeof(nv_path) - 1] = '\0';
 	}
