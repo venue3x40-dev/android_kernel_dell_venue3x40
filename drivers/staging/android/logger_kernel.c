@@ -76,16 +76,21 @@ static void flush_to_bottom_log(struct logger_log *log,
 {
 	struct logger_entry header;
 	char extendedtag[8] = "\4KERNEL\0";
-	struct timespec now;
+	u64 ts;
+	unsigned long rem_nsec;
 	unsigned long flags;
 	struct logger_plugin *plugin;
+	struct timespec boottime;
 
-	now = current_kernel_time();
+	ts = local_clock();
+	rem_nsec = do_div(ts, 1000000000);
+
+	getboottime(&boottime);
 
 	header.pid = current->tgid;
 	header.tid = task_pid_nr(current);
-	header.sec = now.tv_sec;
-	header.nsec = now.tv_nsec;
+	header.sec = boottime.tv_sec + ts;
+	header.nsec = boottime.tv_nsec + rem_nsec;
 	header.euid = current_euid();
 
 	/* length is computed like this:

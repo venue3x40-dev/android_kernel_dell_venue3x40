@@ -59,7 +59,7 @@ config ANDROID_LOGGER
 config ANDROID_LOGGER_PTI
 	tristate "Android log driver on PTI"
 	default n
-	depends on ANDROID_LOGGER
+	depends on ANDROID_LOGGER && INTEL_MID_PTI
 
 config ANDROID_TIMED_OUTPUT
 	bool "Timed output class driver"

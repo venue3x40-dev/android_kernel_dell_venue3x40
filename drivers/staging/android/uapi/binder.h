@@ -56,17 +56,17 @@ typedef __u64 binder_uintptr_t;
  */
 struct flat_binder_object {
 	/* 8 bytes for large_flat_header. */
-	binder_ulong		type;
-	binder_ulong		flags;
+	__u32	type;
+	__u32	flags;
 
 	/* 8 bytes of data. */
 	union {
-		binder_ptr	binder;	/* local object */
-		binder_long	handle;		/* remote object */
+		binder_uintptr_t	binder;	/* local object */
+		__u32			handle;	/* remote object */
 	};
 
 	/* extra data associated with local object */
-	binder_ptr		cookie;
+	binder_uintptr_t	cookie;
 };
 
 /*
@@ -75,18 +75,18 @@ struct flat_binder_object {
  */
 
 struct binder_write_read {
-	binder_long	write_size;	/* bytes to write */
-	binder_long	write_consumed;	/* bytes consumed by driver */
-	binder_ulong	write_buffer;
-	binder_long	read_size;	/* bytes to read */
-	binder_long	read_consumed;	/* bytes consumed by driver */
-	binder_ulong	read_buffer;
+	binder_size_t		write_size;	/* bytes to write */
+	binder_size_t		write_consumed;	/* bytes consumed by driver */
+	binder_uintptr_t	write_buffer;
+	binder_size_t		read_size;	/* bytes to read */
+	binder_size_t		read_consumed;	/* bytes consumed by driver */
+	binder_uintptr_t	read_buffer;
 };
 
 /* Use with BINDER_VERSION, driver fills in fields. */
 struct binder_version {
 	/* driver protocol version -- increment with incompatible change */
-	binder_long	protocol_version;
+	__s32	protocol_version;
 };
 
 /* This is the current protocol version. */
@@ -98,10 +98,10 @@ struct binder_version {
 
 #define BINDER_WRITE_READ		_IOWR('b', 1, struct binder_write_read)
 #define	BINDER_SET_IDLE_TIMEOUT		_IOW('b', 3, __s64)
-#define        BINDER_SET_MAX_THREADS          _IOW('b', 5, binder_size_t)
-#define        BINDER_SET_IDLE_PRIORITY        _IOW('b', 6, binder_long)
-#define        BINDER_SET_CONTEXT_MGR          _IOW('b', 7, binder_long)
-#define        BINDER_THREAD_EXIT              _IOW('b', 8, binder_long)
+#define	BINDER_SET_MAX_THREADS		_IOW('b', 5, __u32)
+#define	BINDER_SET_IDLE_PRIORITY	_IOW('b', 6, __s32)
+#define	BINDER_SET_CONTEXT_MGR		_IOW('b', 7, __s32)
+#define	BINDER_THREAD_EXIT		_IOW('b', 8, __s32)
 #define BINDER_VERSION			_IOWR('b', 9, struct binder_version)
 
 /*
@@ -131,18 +131,18 @@ struct binder_transaction_data {
 	 * identifying the target and contents of the transaction.
 	 */
 	union {
-		binder_size_t	handle;	/* target descriptor of command transaction */
-		binder_ptr ptr;	/* target descriptor of return transaction */
+		__u32	handle;	/* target descriptor of command transaction */
+		binder_uintptr_t ptr;	/* target descriptor of return transaction */
 	} target;
-	binder_ptr		cookie;	/* target object cookie */
-	unsigned int	code;		/* transaction command */
+	binder_uintptr_t	cookie;	/* target object cookie */
+	__u32		code;		/* transaction command */
 
 	/* General information about the transaction. */
 	__u32		flags;
 	pid_t		sender_pid;
 	uid_t		sender_euid;
-	binder_size_t		data_size;	/* number of bytes of data */
-	binder_size_t		offsets_size;	/* number of bytes of offsets */
+	binder_size_t	data_size;	/* number of bytes of data */
+	binder_size_t	offsets_size;	/* number of bytes of offsets */
 
 	/* If this transaction is inline, the data immediately
 	 * follows here; otherwise, it ends with a pointer to
@@ -151,17 +151,17 @@ struct binder_transaction_data {
 	union {
 		struct {
 			/* transaction data */
-			binder_const_ptr	buffer;
+			binder_uintptr_t	buffer;
 			/* offsets from buffer to flat_binder_object structs */
-			binder_const_ptr	offsets;
+			binder_uintptr_t	offsets;
 		} ptr;
 		__u8	buf[8];
 	} data;
 };
 
 struct binder_ptr_cookie {
-	binder_ptr ptr;
-	binder_ptr cookie;
+	binder_uintptr_t ptr;
+	binder_uintptr_t cookie;
 };
 
 struct binder_handle_cookie {
@@ -175,9 +175,9 @@ struct binder_pri_desc {
 };
 
 struct binder_pri_ptr_cookie {
-	int priority;
-	binder_ptr ptr;
-	binder_ptr cookie;
+	__s32 priority;
+	binder_uintptr_t ptr;
+	binder_uintptr_t cookie;
 };
 
 enum binder_driver_return_protocol {
@@ -252,11 +252,11 @@ enum binder_driver_return_protocol {
 	 * stop threadpool thread
 	 */
 
-	BR_DEAD_BINDER = _IOR('r', 15, binder_ptr),
+	BR_DEAD_BINDER = _IOR('r', 15, binder_uintptr_t),
 	/*
 	 * void *: cookie
 	 */
-	BR_CLEAR_DEATH_NOTIFICATION_DONE = _IOR('r', 16, binder_ptr),
+	BR_CLEAR_DEATH_NOTIFICATION_DONE = _IOR('r', 16, binder_uintptr_t),
 	/*
 	 * void *: cookie
 	 */
@@ -337,7 +337,7 @@ enum binder_driver_command_protocol {
 	 * void *: cookie
 	 */
 
-	BC_DEAD_BINDER_DONE = _IOW('c', 16, binder_ptr),
+	BC_DEAD_BINDER_DONE = _IOW('c', 16, binder_uintptr_t),
 	/*
 	 * void *: cookie
 	 */
