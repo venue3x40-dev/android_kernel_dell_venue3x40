@@ -116,7 +116,7 @@ int bl_pwm_configure(u8 duty_val, int level)
 		return 0;
 	}
 
-	printk(KERN_INFO "backlight level: %d, duty_val: %d\n", level, duty_val);
+	printk(KERN_DEBUG "backlight level: %d, duty_val: %d\n", level, duty_val);
 
 	info = pwm_info;
 
