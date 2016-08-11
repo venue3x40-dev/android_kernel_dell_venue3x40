@@ -31,4 +31,4 @@ $(DRIVER_NAME)-objs += \
 	$(HDMI_AUDIO_SRC)/intel_mid_hdmi_audio.o \
 	$(HDMI_AUDIO_SRC)/intel_mid_hdmi_audio_if.o
 
-obj-m += $(DRIVER_NAME).o
+obj-$(CONFIG_SUPPORT_HDMI) += $(DRIVER_NAME).o
