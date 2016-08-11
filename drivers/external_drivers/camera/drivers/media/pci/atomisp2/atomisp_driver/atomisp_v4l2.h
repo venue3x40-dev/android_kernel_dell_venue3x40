@@ -31,5 +31,6 @@ int atomisp_video_init(struct atomisp_video_pipe *video, const char *name);
 void atomisp_video_unregister(struct atomisp_video_pipe *video);
 int atomisp_video_register(struct atomisp_video_pipe *video,
 	struct v4l2_device *vdev);
+const struct firmware *load_firmware(struct atomisp_device *isp);
 
 #endif /* __ATOMISP_V4L2_H__ */

@@ -34,6 +34,7 @@
 #include "atomisp_ioctl.h"
 #include "atomisp_compat.h"
 #include "atomisp_subdev.h"
+#include "atomisp_v4l2.h"
 #include "atomisp-regs.h"
 #include "hmm/hmm.h"
 
@@ -516,6 +517,21 @@ static int atomisp_open(struct file *file)
 	dev_dbg(isp->dev, "open device %s\n", vdev->name);
 
 	mutex_lock(&isp->mutex);
+
+	/* Deferred firmware loading case. */
+	if (isp->css_env.isp_css_fw.bytes == 0) {
+		isp->firmware = load_firmware(isp);
+		if (!isp->firmware) {
+			dev_err(isp->dev, "Failed to load ISP firmware.\n");
+			ret = -ENOENT;
+			goto error;
+		}
+		ret = atomisp_css_load_firmware(isp);
+		if (ret) {
+			dev_err(isp->dev, "Failed to init css.\n");
+			goto error;
+		}
+	}
 
 	if (!isp->input_cnt) {
 		dev_err(isp->dev, "no camera attached\n");

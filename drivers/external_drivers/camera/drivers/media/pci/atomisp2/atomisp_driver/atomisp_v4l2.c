@@ -50,21 +50,27 @@
 #define ATOMISP_INTERNAL_PM	(IS_MOFD)
 
 /* set reserved memory pool size in page */
-unsigned int repool_pgnr;
+unsigned int repool_pgnr = 12288;
 module_param(repool_pgnr, uint, 0644);
 MODULE_PARM_DESC(repool_pgnr,
-		"Set the reserved memory pool size in page (default:0)");
+		"Set the reserved memory pool size in page (default:12288)");
 
 /* set dynamic memory pool size in page */
-unsigned int dypool_pgnr = UINT_MAX;
+unsigned int dypool_pgnr = 12288;
 module_param(dypool_pgnr, uint, 0644);
 MODULE_PARM_DESC(dypool_pgnr,
-		"Set the dynamic memory pool size in page (default:0)");
+		"Set the dynamic memory pool size in page (default:12288)");
 
-bool dypool_enable;
+bool dypool_enable = 1;
 module_param(dypool_enable, bool, 0644);
 MODULE_PARM_DESC(dypool_enable,
-		"dynamic memory pool enable/disable (default:disable)");
+		"dynamic memory pool enable/disable (default:enable)");
+
+/* memory optimization: deferred firmware loading */
+bool defer_fw_load = 1;
+module_param(defer_fw_load, bool, 0644);
+MODULE_PARM_DESC(defer_fw_load,
+		"Defer FW loading until device is opened (default:enable)");
 
 /* cross componnet debug message flag */
 int dbg_level = 0;
@@ -1032,7 +1038,7 @@ error_mipi_csi2:
 	return ret;
 }
 
-static const struct firmware *
+const struct firmware *
 load_firmware(struct atomisp_device *isp)
 {
 	const struct firmware *fw;
@@ -1267,10 +1273,12 @@ static int atomisp_pci_probe(struct pci_dev *dev,
 	}
 
 	/* Load isp firmware from user space */
-	isp->firmware = load_firmware(isp);
-	if (!isp->firmware) {
-		err = -ENOENT;
-		goto load_fw_fail;
+	if (!defer_fw_load) {
+		isp->firmware = load_firmware(isp);
+		if (!isp->firmware) {
+			err = -ENOENT;
+			goto load_fw_fail;
+		}
 	}
 
 	isp->wdt_work_queue = alloc_workqueue(isp->v4l2_dev.name, 0, 1);
@@ -1375,10 +1383,12 @@ static int atomisp_pci_probe(struct pci_dev *dev,
 	hrt_isp_css_mm_init();
 
 	/* Load firmware into ISP memory */
-	err = atomisp_css_load_firmware(isp);
-	if (err) {
-		dev_err(&dev->dev, "Failed to init css.\n");
-		goto css_init_fail;
+	if (!defer_fw_load) {
+		err = atomisp_css_load_firmware(isp);
+		if (err) {
+			dev_err(&dev->dev, "Failed to init css.\n");
+			goto css_init_fail;
+		}
 	}
 #endif /* CSS20 */
 
@@ -1491,7 +1501,7 @@ static void __exit atomisp_exit(void)
 	pci_unregister_driver(&atomisp_pci_driver);
 }
 
-module_init(atomisp_init);
+late_initcall(atomisp_init);
 module_exit(atomisp_exit);
 
 MODULE_AUTHOR("Wen Wang <wen.w.wang@intel.com>");
